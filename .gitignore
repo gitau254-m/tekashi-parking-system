@@ -1,0 +1,16 @@
+# Virtual environments - large and machine-specific; rebuilt from requirements.txt
+.venv*/
+venv/
+
+# Python's compiled cache files
+__pycache__/
+*.pyc
+
+# Secrets (Daraja keys) - must NEVER be pushed to GitHub
+.env
+
+# The SQLite database file - generated when the app runs, holds live data
+parking.db
+
+# Editor settings
+.vscode/
