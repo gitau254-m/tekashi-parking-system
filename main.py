@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from database import get_connection, initialise_database
 from models import ParkingError
-from modules import entry, slots
+from modules import entry, slots,fees
 from state import rebuild_from_database
 
 

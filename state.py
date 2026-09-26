@@ -21,6 +21,7 @@ from collections import deque
 from clock import from_text
 from database import get_rate_tiers, get_settings
 from models import QueueEntry, Transaction, VehicleRecord
+from modules.fees import load_rate_table
 
 
 # ==========================================================================
@@ -65,8 +66,8 @@ class ParkingState:
         self.waiting_queue: deque[QueueEntry] = deque()
         self.queued_set: set[str] = set()
 
-        # Module 3 - rate table: list of {"max_minutes": int or None, "fee_kes": int}.
-        # Step 6 adds sorting and validation (Module 3's load_rate_table).
+        # Module 3 - rate table: sorted, validated list of
+        # {"max_minutes": int or None, "fee_kes": int}.
         self.rate_table: list[dict] = []
 
         # Module 6 - append-only audit log.
@@ -166,11 +167,8 @@ def rebuild_from_database(connection: sqlite3.Connection) -> ParkingState:
         )
         state.queued_set.add(row["plate"])
 
-    # --- Rate table (Step 6 will sort and validate it with Module 3) ---
-    state.rate_table = [
-        {"max_minutes": row["max_minutes"], "fee_kes": row["fee_kes"]}
-        for row in get_rate_tiers(connection)
-    ]
+    # --- Rate table: sorted and validated by Module 3 ---
+    state.rate_table = load_rate_table([dict(row) for row in get_rate_tiers(connection)])
 
     # --- Audit log: every completed stay, oldest first ---
     state.audit_log = [
