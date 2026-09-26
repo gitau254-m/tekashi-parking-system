@@ -1,5 +1,5 @@
 """
-tests/test_parking.py - Automated tests (Modules 1-3 for now; Steps 7-9 add more).
+tests/test_parking.py - Automated tests for all six modules.
 
 Run from the project root:
     python -m pytest -v
@@ -13,10 +13,11 @@ from datetime import datetime, timedelta
 import pytest
 
 import clock
+import daraja
 from config import DEFAULT_RATE_TIERS, TIMEZONE
 from database import get_connection, initialise_database
 from models import ParkingError
-from modules import entry, fees, slots
+from modules import entry, fees, payment, slots
 from modules.fees import calculate_duration, calculate_fee, load_rate_table
 from state import check_invariants, rebuild_from_database
 
@@ -48,6 +49,13 @@ def state(tmp_path, advance):
     yield parking                       # the test runs here
     check_invariants(parking)           # after EVERY test, the rules must still hold
     connection.close()
+
+
+@pytest.fixture(autouse=True)
+def no_real_mpesa(monkeypatch):
+    """autouse = applies to EVERY test. Tests must never call the real Safaricom
+    servers, even if your .env has keys: MPESA is simulated unless a test says otherwise."""
+    monkeypatch.setattr(daraja, "is_configured", lambda: False)
 
 
 def rates():
@@ -179,6 +187,84 @@ def test_bad_rate_update_keeps_old_rates(state):
     with pytest.raises(ParkingError):
         fees.update_rates(state, [{"max_minutes": 30, "fee_kes": 0}])   # no final tier
     assert fees.get_rates(state) == before
+
+
+# ---------------------------------------------------------------- Module 4: payment
+
+def quoted(state, advance, plate="KDA123X", minutes=45):
+    """Helper: park a car and get a paid-stay quote (45 min -> KES 50)."""
+    entry.handle_arrival(state, plate)
+    advance(minutes=minutes)
+    fees.request_exit_quote(state, plate)
+
+
+def test_simulated_payment(state, advance):
+    quoted(state, advance)
+    receipt = payment.pay(state, "KDA123X", "card")
+    assert (receipt["status"], receipt["amount"]) == ("PAID", 50)
+    assert state.vehicle_records["KDA123X"].paid is True
+
+
+def test_payment_needs_a_quote_first(state):
+    entry.handle_arrival(state, "KDA123X")
+    with pytest.raises(ParkingError):
+        payment.pay(state, "KDA123X", "CASH")
+
+
+def test_failed_payment_changes_nothing(state, advance):
+    quoted(state, advance)
+    with pytest.raises(ParkingError):
+        payment.pay(state, "KDA123X", "CARD", simulate_failure=True)
+    assert state.vehicle_records["KDA123X"].paid is False
+
+
+def test_cannot_pay_twice(state, advance):
+    quoted(state, advance)
+    payment.pay(state, "KDA123X", "CASH")
+    with pytest.raises(ParkingError):
+        payment.pay(state, "KDA123X", "CASH")
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("0712345678", "254712345678"), ("+254 712 345 678", "254712345678"),
+    ("712345678", "254712345678"), ("0110345678", "254110345678"),
+])
+def test_phone_normalization(raw, expected):
+    assert payment.normalize_phone(raw) == expected
+
+
+def fake_mpesa(monkeypatch, query_answers):
+    """Pretend Safaricom: stk_push succeeds; stk_query returns the given answers in order."""
+    monkeypatch.setattr(daraja, "is_configured", lambda: True)
+    monkeypatch.setattr(daraja, "stk_push", lambda phone, amount, ref: "ws_CO_TEST123")
+    answers = iter(query_answers)
+    monkeypatch.setattr(daraja, "stk_query", lambda checkout_id: next(answers))
+
+
+def test_mpesa_prompt_then_success(state, advance, monkeypatch):
+    quoted(state, advance)
+    fake_mpesa(monkeypatch, [("PENDING", "waiting"), ("0", "processed successfully")])
+    assert payment.pay(state, "KDA123X", "MPESA", phone="0712345678")["status"] == "PENDING"
+    assert payment.check_mpesa_payment(state, "KDA123X")["status"] == "PENDING"
+    assert payment.check_mpesa_payment(state, "KDA123X")["status"] == "PAID"
+    record = state.vehicle_records["KDA123X"]
+    assert (record.paid, record.payment_method, record.amount_paid) == (True, "MPESA", 50)
+
+
+def test_mpesa_cancelled_leaves_car_unpaid(state, advance, monkeypatch):
+    quoted(state, advance)
+    fake_mpesa(monkeypatch, [("1032", "Request cancelled by user")])
+    payment.pay(state, "KDA123X", "MPESA", phone="0712345678")
+    assert payment.check_mpesa_payment(state, "KDA123X")["status"] == "FAILED"
+    assert state.vehicle_records["KDA123X"].paid is False
+
+
+def test_mpesa_double_tap_sends_one_prompt(state, advance, monkeypatch):
+    quoted(state, advance)
+    fake_mpesa(monkeypatch, [])
+    payment.pay(state, "KDA123X", "MPESA", phone="0712345678")
+    with pytest.raises(ParkingError):                      # second prompt refused
+        payment.pay(state, "KDA123X", "MPESA", phone="0712345678")
 
 
 # ---------------------------------------------------------------- persistence

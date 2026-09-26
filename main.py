@@ -12,14 +12,16 @@ Test every route at http://127.0.0.1:8000/docs
 """
 
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import clock
 from database import get_connection, initialise_database
 from models import ParkingError
-from modules import entry, slots,fees
+from modules import audit, barrier, entry, fees, payment, slots
 from state import rebuild_from_database
 
 
@@ -57,6 +59,13 @@ def get_state(request: Request):
 
 class PlateIn(BaseModel):
     plate: str = Field(examples=["KDA 123X"])
+
+
+class PaymentIn(BaseModel):
+    plate: str = Field(examples=["KDA 123X"])
+    method: str = Field(examples=["MPESA"])
+    phone: str | None = Field(default=None, examples=["0712345678"])   # needed for real M-Pesa
+    simulate_failure: bool = False                                      # demo the failure path
 
 
 class RateTierIn(BaseModel):
@@ -142,3 +151,37 @@ def rates_update(body: RatesIn, request: Request):
     """UC8: replace the rate table (validated first)."""
     # model_dump() turns each Pydantic object into a plain dict.
     return fees.update_rates(get_state(request), [tier.model_dump() for tier in body.tiers])
+
+
+# ---- Module 4: Payment ----
+@app.post("/api/payment", tags=["4. Payment"])
+def pay(body: PaymentIn, request: Request):
+    """UC6: MPESA sends a real sandbox prompt (if .env has Daraja keys); CARD/CASH are simulated."""
+    return payment.pay(get_state(request), body.plate, body.method, body.phone,
+                       body.simulate_failure)
+
+
+@app.get("/api/payment/status/{plate}", tags=["4. Payment"])
+def payment_status(plate: str, request: Request):
+    """Check an M-Pesa prompt: PENDING, PAID or FAILED. Poll every ~5 seconds."""
+    return payment.check_mpesa_payment(get_state(request), plate)
+
+
+# ---- Module 5: Barrier Control ----
+@app.post("/api/exit", tags=["5. Barrier"])
+def vehicle_exit(body: PlateIn, request: Request):
+    """UC7: open the barrier if known, paid and within the grace period."""
+    return barrier.process_exit(get_state(request), body.plate)
+
+
+# ---- Module 6: Reporting / Audit ----
+@app.get("/api/reports/summary", tags=["6. Reports"])
+def report_summary(request: Request, day: date | None = None):
+    """UC10: totals, VAT, and one day's figures (default: today). day format: YYYY-MM-DD."""
+    return audit.get_summary(get_state(request), day or clock.now().date())
+
+
+@app.get("/api/reports/transactions", tags=["6. Reports"])
+def report_transactions(request: Request, limit: int = 20):
+    """UC10: latest completed stays, newest first."""
+    return audit.recent_transactions(get_state(request), limit)

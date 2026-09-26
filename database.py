@@ -90,6 +90,24 @@ CREATE TABLE IF NOT EXISTS transactions (
     payment_reference TEXT
 );
 
+-- Every M-Pesa STK Push request (Module 4). Kept only in the database: it is
+-- a payment log, not one of the in-memory data structures.
+-- request_id is OUR id, created BEFORE calling Safaricom, so a double-tap can
+-- never send two prompts for one bill (idempotency lives in our system).
+CREATE TABLE IF NOT EXISTS mpesa_requests (
+    request_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plate               TEXT NOT NULL,
+    phone_masked        TEXT NOT NULL,                 -- e.g. 2547****4149, never the full number
+    amount_kes          INTEGER NOT NULL CHECK (amount_kes > 0),
+    checkout_request_id TEXT UNIQUE,                   -- Safaricom's id, known after the call
+    status              TEXT NOT NULL
+                        CHECK (status IN ('SENDING', 'PENDING', 'SUCCESS', 'FAILED')),
+    result_code         TEXT,
+    result_desc         TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
 -- Index so daily / date-range reports do not scan the whole table
 CREATE INDEX IF NOT EXISTS idx_transactions_barrier_time
     ON transactions (barrier_time);
@@ -267,6 +285,43 @@ def replace_rate_tiers(connection: sqlite3.Connection, tiers: list[dict]) -> Non
         "INSERT INTO rate_tiers (max_minutes, fee_kes) VALUES (?, ?)",
         [(tier["max_minutes"], tier["fee_kes"]) for tier in tiers],
     )
+
+
+def create_mpesa_request(connection: sqlite3.Connection, plate: str, phone_masked: str,
+                         amount: int, created_at) -> int:
+    """Record an M-Pesa request as SENDING before calling Safaricom. Returns our request_id."""
+    cursor = connection.execute(
+        "INSERT INTO mpesa_requests (plate, phone_masked, amount_kes, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'SENDING', ?, ?)",
+        (plate, phone_masked, amount, to_text(created_at), to_text(created_at)),
+    )
+    return cursor.lastrowid          # the AUTOINCREMENT id SQLite just assigned
+
+
+def update_mpesa_request(connection: sqlite3.Connection, request_id: int, status: str,
+                         updated_at, checkout_request_id: str | None = None,
+                         result_code: str | None = None, result_desc: str | None = None) -> None:
+    """Move a request to a new status. COALESCE(new, old) keeps the old value when new is NULL."""
+    connection.execute(
+        """
+        UPDATE mpesa_requests
+        SET status = ?, updated_at = ?,
+            checkout_request_id = COALESCE(?, checkout_request_id),
+            result_code = COALESCE(?, result_code),
+            result_desc = COALESCE(?, result_desc)
+        WHERE request_id = ?
+        """,
+        (status, to_text(updated_at), checkout_request_id, result_code, result_desc, request_id),
+    )
+
+
+def get_open_mpesa_request(connection: sqlite3.Connection, plate: str) -> sqlite3.Row | None:
+    """The newest request for this plate that is still SENDING or PENDING, or None."""
+    return connection.execute(
+        "SELECT * FROM mpesa_requests WHERE plate = ? AND status IN ('SENDING', 'PENDING') "
+        "ORDER BY request_id DESC LIMIT 1",
+        (plate,),
+    ).fetchone()
 
 
 # --------------------------------------------------------------------------
