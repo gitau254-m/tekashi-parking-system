@@ -17,7 +17,7 @@ import daraja
 from config import DEFAULT_RATE_TIERS, TIMEZONE
 from database import get_connection, initialise_database
 from models import ParkingError
-from modules import entry, fees, payment, slots
+from modules import barrier, entry, fees, payment, slots
 from modules.fees import calculate_duration, calculate_fee, load_rate_table
 from state import check_invariants, rebuild_from_database
 
@@ -265,6 +265,59 @@ def test_mpesa_double_tap_sends_one_prompt(state, advance, monkeypatch):
     payment.pay(state, "KDA123X", "MPESA", phone="0712345678")
     with pytest.raises(ParkingError):                      # second prompt refused
         payment.pay(state, "KDA123X", "MPESA", phone="0712345678")
+
+
+# ---------------------------------------------------------------- Module 5: barrier
+
+def test_paid_stay_full_journey(state, advance):
+    quoted(state, advance)
+    with pytest.raises(ParkingError):                    # barrier closed before payment
+        barrier.process_exit(state, "KDA123X")
+    payment.pay(state, "KDA123X", "MPESA")               # simulated (autouse fixture)
+    result = barrier.process_exit(state, "KDA123X")
+    assert result["barrier"] == "OPEN"
+    assert len(state.audit_log) == 1 and state.audit_log[0].amount_paid == 50
+    assert state.free_heap == [0, 1]                     # slot is free again
+
+
+def test_free_stay_exits_without_payment(state, advance):
+    entry.handle_arrival(state, "KDA123X")
+    advance(minutes=20)
+    fees.request_exit_quote(state, "KDA123X")
+    barrier.process_exit(state, "KDA123X")
+    assert state.audit_log[0].payment_method == "FREE"
+
+
+def test_unknown_vehicle_cannot_exit(state):
+    with pytest.raises(ParkingError):
+        barrier.process_exit(state, "NOPE1")
+
+
+def test_exit_promotes_first_queued_vehicle(state, advance):
+    entry.handle_arrival(state, "AAA111")                # slot 1
+    entry.handle_arrival(state, "BBB222")                # slot 2
+    entry.handle_arrival(state, "CCC333")                # queued first
+    entry.handle_arrival(state, "DDD444")                # queued second
+    advance(minutes=10)
+    fees.request_exit_quote(state, "AAA111")             # 10 min -> free
+    result = barrier.process_exit(state, "AAA111")
+    assert result["promoted"] == {"plate": "CCC333", "slot_number": 1,
+                                  "message": "CCC333 - proceed to Slot 1."}
+    assert state.vehicle_records["CCC333"].entry_time == clock.now()   # charged from promotion
+    assert [e.plate for e in state.waiting_queue] == ["DDD444"]
+
+
+def test_grace_period_expiry_charges_only_the_difference(state, advance):
+    quoted(state, advance, minutes=100)                  # 100 min -> KES 50
+    payment.pay(state, "KDA123X", "CASH")
+    advance(minutes=25)                                  # lingers past 15-min grace
+    with pytest.raises(ParkingError):
+        barrier.process_exit(state, "KDA123X")
+    quote = fees.request_exit_quote(state, "KDA123X")    # 125 min -> KES 100
+    assert (quote["fee"], quote["balance_due"]) == (100, 50)
+    payment.pay(state, "KDA123X", "CASH")
+    barrier.process_exit(state, "KDA123X")
+    assert state.audit_log[0].amount_paid == 100
 
 
 # ---------------------------------------------------------------- persistence
