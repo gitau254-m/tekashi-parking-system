@@ -2,84 +2,29 @@
 state.py - The working layer of the system (design doc, Sections 8.2, 8.6, 8.7).
 
 This file holds:
-  1. the SHAPES of the data (VehicleRecord, QueueEntry, Transaction),
-  2. ParkingState - one object holding every in-memory data structure
+  1. ParkingState - one object holding every in-memory data structure
      that the six modules share,
-  3. rebuild_from_database - fills ParkingState from SQLite on start-up,
-  4. check_invariants - verifies the rules that must always be true.
+  2. rebuild_from_database - fills ParkingState from SQLite on start-up,
+  3. check_invariants - verifies the rules that must always be true.
 
 Why rebuild_from_database lives here and not in database.py:
 database.py only knows about SQL. This function builds ParkingState, so it
 belongs next to ParkingState. If database.py imported state.py AND state.py
 imported database.py, Python would hit a "circular import" and fail.
+(The data shapes live in models.py for the same reason.)
 """
 
+import sqlite3
 import threading
 from collections import deque
-from dataclasses import dataclass
-from datetime import datetime
-import sqlite3
 
 from clock import from_text
 from database import get_rate_tiers, get_settings
+from models import QueueEntry, Transaction, VehicleRecord
 
 
 # ==========================================================================
-# 1. Data shapes
-# ==========================================================================
-# A dataclass is a class whose main job is to hold data. Python writes the
-# __init__ (constructor) for us from the field list.
-#
-# frozen=True makes each object READ-ONLY after it is created. To "change"
-# a record you must build a new copy:
-#     updated = dataclasses.replace(record, paid=True)
-# This enforces the write-through rule (Section 8.3): build the new version,
-# save it to the database, and only then put it into memory. Nobody can
-# change a record in memory by accident halfway through.
-
-@dataclass(frozen=True)
-class VehicleRecord:
-    """One vehicle currently inside the lot (design doc, Module 2 table).
-
-    The number plate is NOT a field here - it is the KEY of the
-    vehicle_records hash table that stores these records.
-    """
-    slot: int                                 # index of the allocated slot (0-based)
-    entry_time: datetime                      # when the vehicle was given its slot
-    checkout_time: datetime | None = None     # set by Module 3 (exit quote)
-    duration_minutes: int | None = None       # set by Module 3
-    fee: int | None = None                    # set by Module 3, whole KES
-    amount_paid: int = 0                      # set by Module 4, whole KES
-    paid: bool = False                        # True when nothing is owed for the quote
-    payment_method: str | None = None         # MPESA, CARD, CASH or FREE
-    payment_reference: str | None = None      # receipt / transaction reference
-    paid_at: datetime | None = None           # when payment was confirmed
-
-
-@dataclass(frozen=True)
-class QueueEntry:
-    """One vehicle waiting at the gate while the lot is full (Module 2)."""
-    plate: str
-    queued_at: datetime
-
-
-@dataclass(frozen=True)
-class Transaction:
-    """One completed stay in the append-only audit log (Module 6)."""
-    plate: str
-    slot: int
-    entry_time: datetime
-    checkout_time: datetime
-    barrier_time: datetime
-    duration_minutes: int
-    fee: int
-    amount_paid: int
-    payment_method: str
-    payment_reference: str | None
-
-
-# ==========================================================================
-# 2. ParkingState - every in-memory structure in one place
+# 1. ParkingState - every in-memory structure in one place
 # ==========================================================================
 
 class ParkingState:
@@ -120,8 +65,8 @@ class ParkingState:
         self.waiting_queue: deque[QueueEntry] = deque()
         self.queued_set: set[str] = set()
 
-        # Module 3 - rate table. For now these are the raw database rows;
-        # in Step 6 Module 3's load_rate_table will sort and validate them.
+        # Module 3 - rate table: list of {"max_minutes": int or None, "fee_kes": int}.
+        # Step 6 adds sorting and validation (Module 3's load_rate_table).
         self.rate_table: list[dict] = []
 
         # Module 6 - append-only audit log.
@@ -129,7 +74,7 @@ class ParkingState:
 
 
 # ==========================================================================
-# 3. Rebuilding memory from the database (design doc, Section 8.6)
+# 2. Rebuilding memory from the database (design doc, Section 8.6)
 # ==========================================================================
 
 class StartupError(Exception):
@@ -221,8 +166,11 @@ def rebuild_from_database(connection: sqlite3.Connection) -> ParkingState:
         )
         state.queued_set.add(row["plate"])
 
-    # --- Rate table (validated by Module 3 from Step 6 onwards) ---
-    state.rate_table = [dict(row) for row in get_rate_tiers(connection)]
+    # --- Rate table (Step 6 will sort and validate it with Module 3) ---
+    state.rate_table = [
+        {"max_minutes": row["max_minutes"], "fee_kes": row["fee_kes"]}
+        for row in get_rate_tiers(connection)
+    ]
 
     # --- Audit log: every completed stay, oldest first ---
     state.audit_log = [
@@ -237,7 +185,7 @@ def rebuild_from_database(connection: sqlite3.Connection) -> ParkingState:
 
 
 # ==========================================================================
-# 4. Invariants (design doc, Section 8.7)
+# 3. Invariants (design doc, Section 8.7)
 # ==========================================================================
 
 class InvariantError(Exception):

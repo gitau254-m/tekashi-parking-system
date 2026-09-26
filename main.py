@@ -1,5 +1,5 @@
 """
-main.py - Entry point of the Smart Parking Management System web application.
+main.py - Entry point of the Tekashi Parking System web application.
 
 On start-up this file:
   1. opens the SQLite database and creates the tables if needed (database.py),
@@ -30,8 +30,7 @@ async def lifespan(app: FastAPI):
     # --- start-up ---
     connection = get_connection()
     initialise_database(connection)                      # tables + defaults
-    app.state.parking = rebuild_from_database(
-        connection)  # memory from database
+    app.state.parking = rebuild_from_database(connection)  # memory from database
 
     yield  # the app runs here, serving requests
 
@@ -41,13 +40,13 @@ async def lifespan(app: FastAPI):
 
 # 'app' is the web application object. Every route is attached to it.
 # lifespan=lifespan tells FastAPI to run the start-up/shut-down code above.
-app = FastAPI(title="Smart Parking Management System", lifespan=lifespan)
+app = FastAPI(title="Tekashi Parking System", lifespan=lifespan)
 
 
 @app.get("/")
 def home():
     """Health check: proves the server is running."""
-    return {"status": "running", "system": "Smart Parking Management System"}
+    return {"status": "running", "system": "Tekashi Parking System"}
 
 
 @app.get("/api/status")

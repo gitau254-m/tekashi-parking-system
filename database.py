@@ -11,12 +11,17 @@ This file:
 The in-memory data structures (array, heap, hash table, queue...) are built
 FROM this database on start-up - that part comes in the next step.
 
+It also holds the WRITE helpers (save_vehicle, delete_vehicle, ...). They
+never commit by themselves - the caller wraps them in "with connection:"
+so it decides which writes succeed or fail together (one transaction).
+
 Run this file directly to create and inspect the database:
     python database.py
 """
 
 import sqlite3
 
+from clock import to_text
 from config import DATABASE_PATH, DEFAULT_RATE_TIERS, DEFAULT_SETTINGS
 
 # --------------------------------------------------------------------------
@@ -179,6 +184,89 @@ def get_rate_tiers(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     return connection.execute(
         "SELECT tier_id, max_minutes, fee_kes FROM rate_tiers"
     ).fetchall()
+
+
+# --------------------------------------------------------------------------
+# Write helpers (used by the modules - always inside "with connection:")
+# --------------------------------------------------------------------------
+# These take plain values/objects and only know SQL. They do NOT commit:
+# the calling module decides the transaction boundary.
+
+def save_vehicle(connection: sqlite3.Connection, plate: str, record) -> None:
+    """
+    Insert a vehicle record, or update it if the plate already exists.
+
+    "INSERT ... ON CONFLICT(plate) DO UPDATE" is called an UPSERT
+    (update + insert). 'excluded' means "the values we just tried to insert".
+    """
+    connection.execute(
+        """
+        INSERT INTO active_vehicles (
+            plate, slot_index, entry_time, checkout_time, duration_minutes,
+            fee_kes, amount_paid_kes, paid, payment_method, payment_reference, paid_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(plate) DO UPDATE SET
+            slot_index        = excluded.slot_index,
+            entry_time        = excluded.entry_time,
+            checkout_time     = excluded.checkout_time,
+            duration_minutes  = excluded.duration_minutes,
+            fee_kes           = excluded.fee_kes,
+            amount_paid_kes   = excluded.amount_paid_kes,
+            paid              = excluded.paid,
+            payment_method    = excluded.payment_method,
+            payment_reference = excluded.payment_reference,
+            paid_at           = excluded.paid_at
+        """,
+        (
+            plate, record.slot, to_text(record.entry_time), to_text(record.checkout_time),
+            record.duration_minutes, record.fee, record.amount_paid, int(record.paid),
+            record.payment_method, record.payment_reference, to_text(record.paid_at),
+        ),
+    )
+
+
+def delete_vehicle(connection: sqlite3.Connection, plate: str) -> None:
+    """Remove a vehicle from active_vehicles (it has left the lot)."""
+    connection.execute("DELETE FROM active_vehicles WHERE plate = ?", (plate,))
+
+
+def add_to_queue(connection: sqlite3.Connection, plate: str, queued_at) -> None:
+    """Add a vehicle to the back of the waiting queue."""
+    connection.execute(
+        "INSERT INTO waiting_queue (plate, queued_at) VALUES (?, ?)",
+        (plate, to_text(queued_at)),
+    )
+
+
+def remove_from_queue(connection: sqlite3.Connection, plate: str) -> None:
+    """Remove a vehicle from the waiting queue (promoted, or drove away)."""
+    connection.execute("DELETE FROM waiting_queue WHERE plate = ?", (plate,))
+
+
+def insert_transaction(connection: sqlite3.Connection, txn) -> None:
+    """Append one completed stay to the audit log. There is no update/delete."""
+    connection.execute(
+        """
+        INSERT INTO transactions (
+            plate, slot_index, entry_time, checkout_time, barrier_time,
+            duration_minutes, fee_kes, amount_paid_kes, payment_method, payment_reference
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            txn.plate, txn.slot, to_text(txn.entry_time), to_text(txn.checkout_time),
+            to_text(txn.barrier_time), txn.duration_minutes, txn.fee, txn.amount_paid,
+            txn.payment_method, txn.payment_reference,
+        ),
+    )
+
+
+def replace_rate_tiers(connection: sqlite3.Connection, tiers: list[dict]) -> None:
+    """Replace the whole rate table with an already-validated list of tiers."""
+    connection.execute("DELETE FROM rate_tiers")
+    connection.executemany(
+        "INSERT INTO rate_tiers (max_minutes, fee_kes) VALUES (?, ?)",
+        [(tier["max_minutes"], tier["fee_kes"]) for tier in tiers],
+    )
 
 
 # --------------------------------------------------------------------------
