@@ -17,7 +17,7 @@ import daraja
 from config import DEFAULT_RATE_TIERS, TIMEZONE
 from database import get_connection, initialise_database
 from models import ParkingError
-from modules import barrier, entry, fees, payment, slots
+from modules import audit, barrier, entry, fees, payment, slots
 from modules.fees import calculate_duration, calculate_fee, load_rate_table
 from state import check_invariants, rebuild_from_database
 
@@ -318,6 +318,32 @@ def test_grace_period_expiry_charges_only_the_difference(state, advance):
     payment.pay(state, "KDA123X", "CASH")
     barrier.process_exit(state, "KDA123X")
     assert state.audit_log[0].amount_paid == 100
+
+
+# ---------------------------------------------------------------- Module 6: reports
+
+def test_reports_and_vat(state, advance):
+    quoted(state, advance, plate="AAA111")               # KES 50
+    payment.pay(state, "AAA111", "CASH")
+    barrier.process_exit(state, "AAA111")
+    quoted(state, advance, plate="BBB222", minutes=130)  # KES 100
+    payment.pay(state, "BBB222", "CARD")
+    barrier.process_exit(state, "BBB222")
+
+    summary = audit.get_summary(state, clock.now().date())
+    assert (summary["total_transactions"], summary["total_revenue"]) == (2, 150)
+    assert summary["day"]["vehicles"] == 2
+    assert summary["total_vat"] == 20.69                 # 150 x 16 / 116
+    newest = audit.recent_transactions(state, limit=1)[0]
+    assert newest["plate"] == "BBB222"
+
+
+def test_audit_log_survives_restart(state, advance):
+    quoted(state, advance)
+    payment.pay(state, "KDA123X", "CASH")
+    barrier.process_exit(state, "KDA123X")
+    restarted = rebuild_from_database(state.connection)
+    assert restarted.audit_log == state.audit_log
 
 
 # ---------------------------------------------------------------- persistence
