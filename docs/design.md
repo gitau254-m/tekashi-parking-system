@@ -865,16 +865,30 @@ FUNCTION daily_report(audit_log, date):
 FUNCTION vat_portion(total, vat_rate_percent):
     // fees are VAT-inclusive, so the VAT inside a total is rate / (100 + rate)
     RETURN total * vat_rate_percent / (100 + vat_rate_percent)
+
+FUNCTION list_stays(audit_log, limit, day = null, month = null):
+    // newest first; day = one date, month = e.g. "2026-08" (last month's records)
+    found = empty list
+    FOR each transaction IN audit_log, FROM THE NEWEST BACKWARDS:
+        IF day IS NOT null AND date_of(transaction.barrier_time) != day: SKIP
+        IF month IS NOT null AND month_of(transaction.barrier_time) != month: SKIP
+        APPEND transaction TO found
+        IF length(found) == limit: STOP
+    RETURN found
 ```
+
+The admin page shows these stays in a table with the **date** of every
+stay, and a filter for *the latest 20*, *one day* or *a whole month*, with
+the number of stays and the total collected for that period.
 
 **Note:** traversing the in-memory list demonstrates the algorithm. In
 production, the same report would be a SQL `SUM` query using the index on
 `barrier_time` (Section 8.4), which avoids reading every row for a
 single-day report.
 
-**Complexity:** append O(1) amortized; total and daily report O(t), where
-t = number of transactions ever recorded — unavoidable, since every
-shilling must be accounted for.
+**Complexity:** append O(1) amortized; total, daily report and stays by
+day or month O(t), where t = number of transactions ever recorded —
+unavoidable, since every shilling must be accounted for.
 
 ---
 
@@ -911,6 +925,7 @@ an afterthought:
 | 24 | 4 — Payment (M-Pesa) | A prompt never gets an answer (e.g. the server restarted mid-payment) | Requests still open after 5 minutes are marked FAILED, so they cannot block a new payment |
 | 25 | 4 — Payment (M-Pesa) | Daraja keys missing from `.env`, or `MPESA_ENABLED=false` | M-Pesa falls back to the simulator, so the system still works |
 | 26 | Admin | A staff page or staff API route is used without signing in | Page: redirected to the sign-in page. API: 401 "Admin login required". Plates are never shown on public pages |
+| 27 | 2, 4 — Entry / Payment | A car that has left comes back later | Its old stay is already archived in `transactions`, so it checks in as a brand-new stay and pays for that stay. "Never charged twice" means once per stay, not once per plate |
 
 ---
 
@@ -940,7 +955,7 @@ m = rate tiers, t = transactions recorded.
 | 4 — Payment | Start / check an M-Pesa prompt | O(1) + one network call | O(v) * + network |
 | 5 — Barrier Control | Process exit | O(1) | O(log n) |
 | 6 — Reporting | Log transaction (append) | O(1) amortized | O(t) ** |
-| 6 — Reporting | Total revenue / daily report | O(t) | O(t) |
+| 6 — Reporting | Total revenue / daily report / stays by day or month | O(t) | O(t) |
 | Database | Rebuild on start-up | O(n + v + q + t + m log m) | same |
 
 \* A hash table is O(1) on **average**. In the worst case — many keys
@@ -1343,7 +1358,8 @@ tekashi-parking-system/
 │   ├── barrier.py     # Module 5 - Barrier Control
 │   └── audit.py       # Module 6 - Reporting / Audit
 ├── templates/         # base.html, _macros.html, home, display, entry, exit, login, admin
-├── static/            # css/, js/ (app.js, effects.js), vendor/ (Motion), fonts/, img/
+├── static/            # css/, js/ (app.js, effects.js), vendor/ (Motion), fonts/,
+│                      #   img/ (logo mark, favicons, home-page photo)
 ├── tests/             # test_parking.py (modules) and test_web.py (pages, login)
 ├── docs/              # this design document and README screenshots
 ├── .env.example       # template for the secret .env file (never committed)
@@ -1384,12 +1400,12 @@ the staff sign-in.
 | `GET /api/payment/status/{plate}` | 4 | UC6 - check an M-Pesa prompt |
 | `POST /api/exit` | 5 | UC7 - open the barrier |
 | `GET /api/reports/summary` *(admin)* | 6 | UC10 - takings, VAT, one day's figures |
-| `GET /api/reports/transactions` *(admin)* | 6 | UC10 - recent completed stays |
+| `GET /api/reports/transactions?day=&month=&limit=` *(admin)* | 6 | UC10 - completed stays: latest, one day (`day=2026-09-27`) or one month (`month=2026-08`) |
 | `GET /api/health` | - | health check |
 
 ### 9.5 Testing
 
-59 automated tests (`python -m pytest`) run against a fresh temporary
+64 automated tests (`python -m pytest`) run against a fresh temporary
 database with a frozen, hand-moved clock, and never contact Safaricom:
 
 - **Module 3 boundaries:** the whole fee table from Section 4.3 (0, 30, 31,
@@ -1397,12 +1413,14 @@ database with a frozen, hand-moved clock, and never contact Safaricom:
   kind of invalid rate table.
 - **Journeys:** check in → quote → pay → exit; free stays; declined
   payments; paying twice; queue promotion; the grace period and paying only
-  the difference.
+  the difference; a car that leaves and comes back starts a new stay.
 - **M-Pesa:** prompt then success, cancelled prompt, double-tap refused,
   phone number formats (Safaricom is replaced by a fake in tests).
+- **Reports:** takings and VAT; stays listed for one day or a whole month.
 - **Persistence:** a simulated restart rebuilds exactly the same structures.
-- **Web:** every page loads, the admin area is locked, sign-in and sign-out
-  work, and public pages never show number plates.
+- **Web:** every page loads, the favicon is served, the admin area is
+  locked, sign-in and sign-out work, bad report filters are rejected, and
+  public pages never show number plates.
 - After every test, all six invariants (Section 8.7) are checked.
 
 ---
@@ -1449,3 +1467,5 @@ the data structures and algorithms above; it only adds safety or detail.
 | 19 | `auth.py`, `pages.py`, `templates/` and `static/` added for the web interface | Section 9.2 |
 | 20 | Pages `/` (home) and `/admin/login` added | Section 9.3 |
 | 21 | `MPESA_ENABLED` switch; sandbox prompts to real phones take real money (usually reversed) | Section 1.4 |
+| 22 | Stays can be listed for one day or a whole month, each with its date, so past months can be reconciled | Sections 4.6, 9.4 |
+| 23 | Clarified: "never charged twice" is once per stay - a car that leaves and returns starts a new stay | Section 5 (row 27) |
