@@ -49,9 +49,14 @@ class DarajaError(Exception):
     """Safaricom could not be reached, or refused the request."""
 
 
+# Master switch. MPESA_ENABLED=false keeps your keys in .env but uses the
+# simulator, so everyday testing never sends a real prompt (or takes real money).
+ENABLED = os.environ.get("MPESA_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+
 def is_configured() -> bool:
-    """True when all credentials are present in .env - otherwise MPESA is simulated."""
-    return bool(CONSUMER_KEY and CONSUMER_SECRET and PASSKEY)
+    """True when M-Pesa is switched on AND all credentials are in .env - otherwise simulated."""
+    return ENABLED and bool(CONSUMER_KEY and CONSUMER_SECRET and PASSKEY)
 
 
 # ---------------------------------------------------------------- access token

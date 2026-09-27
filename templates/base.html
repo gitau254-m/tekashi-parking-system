@@ -1,0 +1,77 @@
+{#
+  base.html - the shared layout every page EXTENDS (template inheritance).
+  Child pages fill the {% block %} sections; everything else (head, fonts,
+  navigation, footer, icons, scripts) is written once here.
+  Jinja syntax: double curly braces print a value, curly-percent tags are
+  logic (if / for / block), and curly-hash marks a comment like this one.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>{% block title %}Tekashi Parking{% endblock %}</title>
+  {# The font lives in static/fonts, so pages look right even without internet. #}
+  <link rel="preload" href="{{ url_for('static', path='fonts/archivo-variable.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+</head>
+<body data-page="{{ page }}" class="{% block body_class %}{% endblock %}">
+
+  {# One inline SVG icon set, reused anywhere with <use href="#car">. #}
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="car" viewBox="0 0 40 72">
+      <rect x="4" y="3" width="32" height="66" rx="11" fill="currentColor"/>
+      <path d="M9 22 Q20 16 31 22 L29 31 Q20 28 11 31 Z" fill="#000" opacity=".55"/>
+      <path d="M11 52 Q20 55 29 52 L30 59 Q20 62 10 59 Z" fill="#000" opacity=".45"/>
+      <rect x="10" y="35" width="20" height="3" rx="1.5" fill="#000" opacity=".25"/>
+    </symbol>
+    <symbol id="phone" viewBox="0 0 24 24">
+      <rect x="6" y="2" width="12" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="12" cy="18" r="1.2" fill="currentColor"/>
+    </symbol>
+    {# A Maasai shield, as on the Kenyan flag - used as the ticker separator. #}
+    <symbol id="shield" viewBox="0 0 20 32">
+      <path d="M10 0 C17 6 17 26 10 32 C3 26 3 6 10 0 Z" fill="#fff"/>
+      <path d="M10 2.5 C15.5 8 15.5 24 10 29.5 C4.5 24 4.5 8 10 2.5 Z" fill="#E0162B"/>
+      <path d="M10 5 C12 10 12 22 10 27 C8 22 8 10 10 5 Z" fill="#000"/>
+      <path d="M10 12 C11.2 14 11.2 18 10 20 C8.8 18 8.8 14 10 12 Z" fill="#fff"/>
+    </symbol>
+  </svg>
+
+  {% block header %}
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Tekashi Parking System home">
+      <span class="brand-name">Tekashi</span>
+      <span class="brand-sub">Parking System</span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="/display" {% if page == 'display' %}aria-current="page"{% endif %}>Live bays</a>
+      <a href="/entry" {% if page == 'entry' %}aria-current="page"{% endif %}>Check in</a>
+      <a href="/exit" {% if page == 'exit' %}aria-current="page"{% endif %}>Pay and exit</a>
+      <a href="/admin" {% if page == 'admin' %}aria-current="page"{% endif %}>Admin</a>
+    </nav>
+  </header>
+  {% endblock %}
+
+  {# The Kenyan flag as a thin stripe: black, white, red, white, green. #}
+  <div class="flag-stripe" aria-hidden="true" data-flag-stripe></div>
+
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block footer %}
+  <footer class="site-footer">
+    <p class="footer-brand">Tekashi Parking System</p>
+    <p class="muted">A Multimedia University of Kenya Data Structures and Algorithms project.</p>
+  </footer>
+  {% endblock %}
+
+  {# Motion (from the makers of Framer Motion) runs the animations in effects.js;
+     app.js makes the pages live. Order matters: each script uses the one before. #}
+  <script src="{{ url_for('static', path='vendor/motion.js') }}"></script>
+  <script src="{{ url_for('static', path='js/effects.js') }}"></script>
+  <script src="{{ url_for('static', path='js/app.js') }}"></script>
+</body>
+</html>

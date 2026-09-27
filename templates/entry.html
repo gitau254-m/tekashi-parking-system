@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bay_lot, plate_field %}
+
+{% block title %}Check in - Tekashi Parking{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <h1 class="page-title">Check in</h1>
+  <p class="muted">Type your number plate. We'll give you the nearest free bay.</p>
+</section>
+
+<section class="split">
+  <div class="panel">
+    <form class="stack" data-entry-form novalidate>
+      {{ plate_field("entry-plate") }}
+      <button class="btn btn-primary btn-wide" type="submit">Check in</button>
+    </form>
+
+    {# Filled in by app.js after the plate is submitted. #}
+    <div class="result" data-entry-result hidden aria-live="polite"></div>
+    <p class="alert" data-entry-error role="alert" hidden></p>
+  </div>
+
+  <div class="panel panel-quiet">
+    <h2 class="panel-title">Bays right now</h2>
+    <p class="muted" data-entry-summary>
+      {{ display.free_slots }} of {{ display.capacity }} free{% if display.vehicles_waiting %}, {{ display.vehicles_waiting }} waiting{% endif %}
+    </p>
+    {{ bay_lot(display.slots) }}
+  </div>
+</section>
+{% endblock %}

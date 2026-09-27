@@ -1,0 +1,69 @@
+{#
+  _macros.html - reusable pieces, like functions for HTML.
+  A page imports them with:  {% from "_macros.html" import bay_lot %}
+#}
+
+{# The parking lot drawn from above: two rows of bays facing a driving lane. #}
+{% macro bay_lot(slots, show_plates=False) %}
+  {% set half = ((slots | length) + 1) // 2 %}
+  <div class="lot" data-lot>
+    {% for row in [slots[:half], slots[half:]] %}
+      <div class="lot-row {{ 'lot-row--top' if loop.first else 'lot-row--bottom' }}">
+        {% for bay in row %}
+          <div class="bay {{ 'is-free' if bay.status == 'FREE' else 'is-taken' }}"
+               data-bay="{{ bay.slot_number }}">
+            <span class="bay-number">{{ bay.slot_number }}</span>
+            <svg class="bay-car" aria-hidden="true"><use href="#car"></use></svg>
+            <span class="bay-state">
+              {%- if bay.status == 'FREE' -%}Free
+              {%- elif show_plates and bay.plate -%}{{ bay.plate }}
+              {%- else -%}Taken{%- endif -%}
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+      {% if loop.first %}<div class="lot-lane" aria-hidden="true"></div>{% endif %}
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+{# The number-plate styled text field. #}
+{% macro plate_field(id, label="Number plate") %}
+  <label class="field-label" for="{{ id }}">{{ label }}</label>
+  <div class="plate">
+    <span class="plate-flag" aria-hidden="true">KE</span>
+    <input class="plate-input" id="{{ id }}" name="plate" type="text"
+           autocomplete="off" autocapitalize="characters" spellcheck="false"
+           maxlength="12" placeholder="KDA 123X" required>
+  </div>
+{% endmacro %}
+
+{# The price list, straight from the rate table in the database. #}
+{% macro price_list(rates) %}
+  <table class="prices">
+    <caption class="visually-hidden">Parking prices</caption>
+    <tbody>
+      {% for row in rates %}
+        <tr>
+          <th scope="row">{{ row.label }}</th>
+          <td>{% if row.fee == 0 %}Free{% else %}KES {{ "{:,}".format(row.fee) }}{% endif %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endmacro %}
+
+{# A red shuka band with messages scrolling across, like a matatu sign.
+   The list is written twice so the loop joins up without a gap. #}
+{% macro ticker(items) %}
+  <div class="ticker" aria-label="{{ items | join('. ') }}">
+    <div class="ticker-track" aria-hidden="true">
+      {% for _ in range(2) %}
+        {% for item in items %}
+          <span class="ticker-item">{{ item }}</span>
+          <svg class="ticker-shield"><use href="#shield"></use></svg>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+{% endmacro %}

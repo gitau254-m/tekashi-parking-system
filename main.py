@@ -2,9 +2,13 @@
 main.py - Entry point of the Tekashi Parking System web application.
 
 On start-up: open the database, create tables if needed, rebuild the
-in-memory state. Then serve the API routes below.
+in-memory state. Then serve:
+  - the web pages (pages.py, Jinja2 templates in templates/),
+  - the static files (static/: CSS, JavaScript, images),
+  - the JSON API below (used by the pages' JavaScript, testable at /docs).
 
 Routes only translate HTTP <-> Python. All the rules live in modules/.
+Admin-only routes carry dependencies=[Depends(auth.require_admin)].
 
 Run with:
     uvicorn main:app --reload
@@ -14,11 +18,15 @@ Test every route at http://127.0.0.1:8000/docs
 from contextlib import asynccontextmanager
 from datetime import date
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import auth
 import clock
+import pages
+from config import BASE_DIR
 from database import get_connection, initialise_database
 from models import ParkingError
 from modules import audit, barrier, entry, fees, payment, slots
@@ -36,6 +44,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Tekashi Parking System", lifespan=lifespan)
+
+# Serve everything in static/ at /static/... (e.g. /static/css/style.css).
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+# Plug in the HTML pages from pages.py.
+app.include_router(pages.router)
+
+# Shorthand for "only a logged-in admin may call this route".
+ADMIN_ONLY = [Depends(auth.require_admin)]
 
 
 @app.exception_handler(ParkingError)
@@ -83,9 +100,9 @@ class RatesIn(BaseModel):
 # Plain "def" (not "async def"): FastAPI runs these on a thread pool, which
 # is what our threading.Lock is designed for.
 
-@app.get("/")
-def home():
-    """Health check."""
+@app.get("/api/health")
+def health():
+    """Health check (the home page "/" is now a web page)."""
     return {"status": "running", "system": "Tekashi Parking System"}
 
 
@@ -96,13 +113,13 @@ def display(request: Request):
     return slots.get_display(get_state(request))
 
 
-@app.get("/api/admin/slots", tags=["1. Slots"])
+@app.get("/api/admin/slots", tags=["1. Slots"], dependencies=ADMIN_ONLY)
 def admin_slots(request: Request):
     """Staff view of every slot, with plates."""
     return slots.get_display(get_state(request), show_plates=True)
 
 
-@app.get("/api/slots/{slot_number}", tags=["1. Slots"])
+@app.get("/api/slots/{slot_number}", tags=["1. Slots"], dependencies=ADMIN_ONLY)
 def slot_lookup(slot_number: int, request: Request):
     """UC9: who is in this slot?"""
     return slots.who_is_in(get_state(request), slot_number)
@@ -121,13 +138,13 @@ def queue_leave(body: PlateIn, request: Request):
     return entry.leave_queue(get_state(request), body.plate)
 
 
-@app.get("/api/queue", tags=["2. Entry"])
+@app.get("/api/queue", tags=["2. Entry"], dependencies=ADMIN_ONLY)
 def queue_list(request: Request):
     """The waiting queue, front first."""
     return entry.get_queue(get_state(request))
 
 
-@app.get("/api/vehicles/{plate}", tags=["2. Entry"])
+@app.get("/api/vehicles/{plate}", tags=["2. Entry"], dependencies=ADMIN_ONLY)
 def vehicle_lookup(plate: str, request: Request):
     """UC9: where is this vehicle?"""
     return entry.find_vehicle(get_state(request), plate)
@@ -146,7 +163,7 @@ def rates_get(request: Request):
     return fees.get_rates(get_state(request))
 
 
-@app.put("/api/rates", tags=["3. Fees"])
+@app.put("/api/rates", tags=["3. Fees"], dependencies=ADMIN_ONLY)
 def rates_update(body: RatesIn, request: Request):
     """UC8: replace the rate table (validated first)."""
     # model_dump() turns each Pydantic object into a plain dict.
@@ -175,13 +192,13 @@ def vehicle_exit(body: PlateIn, request: Request):
 
 
 # ---- Module 6: Reporting / Audit ----
-@app.get("/api/reports/summary", tags=["6. Reports"])
+@app.get("/api/reports/summary", tags=["6. Reports"], dependencies=ADMIN_ONLY)
 def report_summary(request: Request, day: date | None = None):
     """UC10: totals, VAT, and one day's figures (default: today). day format: YYYY-MM-DD."""
     return audit.get_summary(get_state(request), day or clock.now().date())
 
 
-@app.get("/api/reports/transactions", tags=["6. Reports"])
+@app.get("/api/reports/transactions", tags=["6. Reports"], dependencies=ADMIN_ONLY)
 def report_transactions(request: Request, limit: int = 20):
     """UC10: latest completed stays, newest first."""
     return audit.recent_transactions(get_state(request), limit)

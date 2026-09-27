@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bay_lot, ticker %}
+
+{% block title %}Live bays - Tekashi Parking{% endblock %}
+{% block body_class %}kiosk{% endblock %}
+
+{# The gate screen has its own slim header: brand, date and clock, no menu. #}
+{% block header %}
+<header class="kiosk-header">
+  <a class="brand" href="/" aria-label="Tekashi Parking System home">
+    <span class="brand-name">Tekashi</span>
+    <span class="brand-sub">Parking System</span>
+  </a>
+  <p class="kiosk-time"><span data-date></span><time data-clock></time></p>
+</header>
+{% endblock %}
+
+{% block content %}
+<section class="board" aria-live="polite">
+  <div class="board-status {{ 'is-full' if display.lot_full else '' }}" data-board-status>
+    <p class="board-hello">Karibu</p>
+    <p class="board-count"><strong data-free>{{ display.free_slots }}</strong></p>
+    <p class="board-caption" data-caption>
+      {% if display.lot_full %}Lot full{% elif display.free_slots == 1 %}bay free{% else %}bays free{% endif %}
+    </p>
+    <p class="board-queue" data-queue>
+      {% if display.vehicles_waiting %}{{ display.vehicles_waiting }} {{ 'car' if display.vehicles_waiting == 1 else 'cars' }} waiting. Check in to join the line.
+      {% elif display.lot_full %}Check in to be first in line.
+      {% else %}Drive in and check in at the gate.{% endif %}
+    </p>
+  </div>
+
+  <div class="board-lot">
+    {{ bay_lot(display.slots) }}
+    <p class="board-legend">
+      <span class="legend-free">Free</span>
+      <span class="legend-taken">Taken</span>
+    </p>
+  </div>
+</section>
+
+{# Prices scroll along the bottom of the screen. #}
+{% set price_items = [] %}
+{% for row in rates %}
+  {% set _ = price_items.append(row.label ~ ': ' ~ ('Free' if row.fee == 0 else 'KES ' ~ "{:,}".format(row.fee))) %}
+{% endfor %}
+<div class="board-ticker">{{ ticker(price_items + ['Pay with M-Pesa, card or cash']) }}</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}

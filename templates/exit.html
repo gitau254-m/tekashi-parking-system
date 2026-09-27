@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "_macros.html" import plate_field %}
+
+{% block title %}Pay and exit - Tekashi Parking{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <h1 class="page-title">Pay and exit</h1>
+  <p class="muted">See your time and fee, pay, and the barrier lifts.</p>
+</section>
+
+{# A real sequence, so the steps are numbered. app.js marks the current one. #}
+<ol class="stepper" data-stepper>
+  <li data-step-marker="1" class="is-current">Your fee</li>
+  <li data-step-marker="2">Pay</li>
+  <li data-step-marker="3">Leave</li>
+</ol>
+
+<section class="exit-flow">
+  <p class="alert" data-exit-error role="alert" hidden></p>
+
+  {# ---- Step 1: plate -> quote ---- #}
+  <div class="panel" data-step="1">
+    <form class="stack" data-quote-form novalidate>
+      {{ plate_field("exit-plate") }}
+      <button class="btn btn-primary btn-wide" type="submit">Show my fee</button>
+    </form>
+  </div>
+
+  {# ---- The quote, shown from step 2 on ---- #}
+  <div class="panel quote" data-quote hidden>
+    <div class="quote-plate" data-quote-plate></div>
+    <dl class="quote-grid">
+      <div><dt>Time parked</dt><dd data-quote-time></dd></div>
+      <div><dt>Bay</dt><dd data-quote-bay></dd></div>
+      <div><dt>Fee</dt><dd data-quote-fee></dd></div>
+      <div class="quote-due"><dt>To pay now</dt><dd data-quote-due></dd></div>
+    </dl>
+    <p class="muted small" data-quote-grace></p>
+  </div>
+
+  {# ---- Step 2: payment ---- #}
+  <div class="panel" data-step="2" hidden>
+    <form class="stack" data-pay-form novalidate>
+      <fieldset class="methods">
+        <legend class="field-label">Pay with</legend>
+        <label class="method"><input type="radio" name="method" value="MPESA" checked><span>M-Pesa</span></label>
+        <label class="method"><input type="radio" name="method" value="CARD"><span>Card</span></label>
+        <label class="method"><input type="radio" name="method" value="CASH"><span>Cash</span></label>
+      </fieldset>
+
+      <div data-phone-row>
+        <label class="field-label" for="pay-phone">M-Pesa phone number</label>
+        <input class="text-input" id="pay-phone" name="phone" type="tel"
+               inputmode="tel" autocomplete="tel" placeholder="0712 345 678">
+      </div>
+
+      <label class="check" data-decline-row hidden>
+        <input type="checkbox" name="simulate_failure"> Demo: decline this payment
+      </label>
+
+      <button class="btn btn-primary btn-wide" type="submit" data-pay-button>Pay</button>
+    </form>
+
+    <div class="waiting" data-waiting hidden aria-live="polite">
+      <svg class="waiting-phone" aria-hidden="true"><use href="#phone"></use></svg>
+      <div>
+        <p class="waiting-title">Check your phone</p>
+        <p class="muted" data-waiting-text>Enter your M-Pesa PIN to finish paying.</p>
+      </div>
+    </div>
+  </div>
+
+  {# ---- Step 3: barrier ---- #}
+  <div class="panel" data-step="3" hidden>
+    <div class="barrier" data-barrier aria-hidden="true">
+      <span class="barrier-post"></span>
+      <span class="barrier-arm"></span>
+    </div>
+    <p class="leave-title" data-leave-title>You're all paid.</p>
+    <p class="muted" data-leave-text>Drive up to the exit and open the barrier.</p>
+    <button class="btn btn-primary btn-wide" type="button" data-open-barrier>Open the barrier</button>
+    <p class="notice" data-promoted hidden></p>
+  </div>
+
+  <button class="btn btn-link" type="button" data-start-over hidden>Start again with another car</button>
+</section>
+{% endblock %}

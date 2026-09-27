@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bay_lot %}
+
+{% block title %}Control room - Tekashi Parking{% endblock %}
+
+{% block content %}
+<section class="page-head admin-head">
+  <div>
+    <h1 class="page-title">Control room</h1>
+    <p class="muted">Live bays, the waiting line, takings and prices.</p>
+  </div>
+  <div class="admin-tools">
+    <label class="field-label" for="report-day">Takings for</label>
+    <input class="text-input" type="date" id="report-day" data-report-day value="{{ today }}">
+    <form method="post" action="/admin/logout">
+      <button class="btn btn-ghost" type="submit">Sign out</button>
+    </form>
+  </div>
+</section>
+
+{# Figures filled in by app.js from /api/reports/summary and /api/admin/slots. #}
+<dl class="figures" aria-live="polite">
+  <div class="figure"><dt>Takings</dt><dd><strong data-fig="day-revenue">-</strong><span data-fig="day-label"></span></dd></div>
+  <div class="figure"><dt>VAT included</dt><dd><strong data-fig="day-vat">-</strong><span data-fig="vat-rate"></span></dd></div>
+  <div class="figure"><dt>Cars that left</dt><dd><strong data-fig="day-vehicles">-</strong><span>on this day</span></dd></div>
+  <div class="figure"><dt>Cars inside</dt><dd><strong data-fig="inside">{{ display.occupied_slots }}</strong><span>of {{ display.capacity }} bays</span></dd></div>
+  <div class="figure"><dt>Waiting</dt><dd><strong data-fig="waiting">{{ display.vehicles_waiting }}</strong><span>at the gate</span></dd></div>
+  <div class="figure"><dt>All-time takings</dt><dd><strong data-fig="total-revenue">-</strong><span data-fig="total-count"></span></dd></div>
+</dl>
+
+<section class="admin-grid">
+  <div class="panel">
+    <h2 class="panel-title">Bays</h2>
+    {{ bay_lot(display.slots, show_plates=True) }}
+  </div>
+
+  <div class="stack-lg">
+    <div class="panel">
+      <h2 class="panel-title">Find a car or bay</h2>
+      <form class="inline-form" data-lookup-form>
+        <label class="visually-hidden" for="lookup">Number plate or bay number</label>
+        <input class="text-input" id="lookup" placeholder="KDA 123X or 7" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Find</button>
+      </form>
+      <p class="lookup-result" data-lookup-result aria-live="polite"></p>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-title">Waiting line</h2>
+      <ol class="queue-list" data-queue-list><li class="muted">Loading...</li></ol>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">Prices</h2>
+  <p class="muted small">Each row is "up to this many minutes, this fee". Leave "up to" empty on the last row: it covers every longer stay.</p>
+  <form data-rates-form>
+    <table class="rates-table">
+      <thead><tr><th scope="col">Up to (minutes)</th><th scope="col">Fee (KES)</th><th scope="col"><span class="visually-hidden">Remove</span></th></tr></thead>
+      <tbody data-rates-body></tbody>
+    </table>
+    <div class="row-actions">
+      <button class="btn btn-ghost" type="button" data-add-rate>Add a row</button>
+      <button class="btn btn-primary" type="submit">Save prices</button>
+    </div>
+    <p class="form-message" data-rates-message aria-live="polite"></p>
+  </form>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">Recent stays</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th scope="col">Plate</th><th scope="col">Bay</th><th scope="col">In</th><th scope="col">Out</th>
+            <th scope="col">Time</th><th scope="col">Paid</th><th scope="col">Method</th></tr>
+      </thead>
+      <tbody data-transactions><tr><td colspan="7" class="muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

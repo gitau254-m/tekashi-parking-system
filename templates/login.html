@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Admin sign in - Tekashi Parking{% endblock %}
+
+{% block content %}
+<section class="login">
+  <div class="panel login-panel">
+    <h1 class="page-title">Control room</h1>
+    <p class="muted">Staff only. Sign in to see bays, takings and prices.</p>
+
+    {% if not password_is_set %}
+      <p class="alert" role="alert">No admin password is set yet. Add ADMIN_PASSWORD to the .env file
+        and restart the server.</p>
+    {% endif %}
+    {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+    {# A normal HTML form: the browser posts it to /admin/login (pages.py). #}
+    <form class="stack" method="post" action="/admin/login">
+      <label class="field-label" for="password">Password</label>
+      <input class="text-input" id="password" name="password" type="password"
+             autocomplete="current-password" required autofocus>
+      <button class="btn btn-primary btn-wide" type="submit">Sign in</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
