@@ -210,6 +210,7 @@ function initExit() {
   }
 
   function goToLeave(message) {
+    $("[data-quote-due]").textContent = "Nothing";   // at this point the bill is settled
     $("[data-leave-title]").textContent = message;
     $("[data-leave-text]").textContent = "Drive up to the exit and open the barrier.";
     show($("[data-open-barrier]"));

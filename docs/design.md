@@ -1,9 +1,12 @@
-# Smart Parking Management System
+# Tekashi Parking System
 
 ### Data Structures & Algorithm Design Document — Task One
 
 **Course:** Data Structures and Algorithms — Multimedia University of Kenya (MMU)
 **Language:** Python (FastAPI web application, Jinja2 page templates, SQLite database)
+**Payments:** M-Pesa Daraja sandbox (STK Push), plus simulated card and cash
+**Status:** Implemented. Section 11 lists every change made between this
+design and the working system.
 
 ---
 
@@ -17,8 +20,9 @@
 6. [Complexity Summary](#6-complexity-summary)
 7. [System Flow](#7-system-flow)
 8. [Dynamic Database Design](#8-dynamic-database-design)
-9. [Implementation Plan (Phase 2)](#9-implementation-plan-phase-2)
+9. [Implementation (Phase 2)](#9-implementation-phase-2)
 10. [Future Extensions](#10-future-extensions)
+11. [Design Changes During Implementation](#11-design-changes-during-implementation)
 
 ---
 
@@ -48,8 +52,9 @@ only once payment is confirmed.
 
 **In scope:** entry lane control, slot monitoring and display, slot
 allocation, waiting queue when the lot is full, duration and fee
-computation, payment collection (simulated), exit barrier control,
-exception handling, rate management, and administrative reporting.
+computation, payment collection (M-Pesa sandbox STK Push; card and cash
+simulated), exit barrier control, exception handling, rate management,
+administrative reporting, and a password-protected admin area.
 
 **Out of scope for this phase:** online pre-booking of slots, valet
 operations, integration with third-party loyalty schemes, automated
@@ -65,8 +70,16 @@ number-plate recognition (ANPR) cameras, and number-plate blacklisting.
 - **Time:** the server clock is the single source of truth. All timestamps
   are full date-and-time values in Kenyan time (EAT, UTC+03:00), never
   clock-time alone.
-- **Payment is simulated** in this phase (see Module 4). Live M-Pesa Daraja
-  integration is a planned extension, not required for this deliverable.
+- **Payments:** M-Pesa uses Safaricom's Daraja **sandbox** (STK Push to the
+  driver's phone). Card and cash are simulated. A switch in the `.env` file
+  (`MPESA_ENABLED`) turns real prompts on or off; when off, or when no Daraja
+  keys are configured, M-Pesa is simulated too, so the system always works.
+- **Sandbox money:** a sandbox prompt sent to a *real* phone takes real money
+  from that M-Pesa account (Safaricom normally reverses it). So the prompt
+  asks for a token amount (`MPESA_SANDBOX_AMOUNT`, default KES 1) while the
+  system records the real fee as paid.
+- **Admin access:** staff pages and staff API routes need the admin password
+  (`ADMIN_PASSWORD` in `.env`). Drivers need no account.
 - **Rates:** the fee structure is the one supplied by the client (below). It
   is stored as data in the database, not hardcoded, so management can edit
   it from the admin page.
@@ -99,6 +112,9 @@ number-plate recognition (ANPR) cameras, and number-plate blacklisting.
 | Attendant | Staff member operating the gate terminals and handling exceptions (e.g. finding a vehicle, removing a car from the queue). |
 | Manager | Management of the facility. Changes rates and views revenue and audit reports. |
 
+Attendants and managers **sign in** with the admin password before using
+UC8, UC9 and UC10. Drivers use UC1 to UC7 without signing in.
+
 ### 2.2 Use Case List
 
 | ID | Use Case | Primary Actor | Module(s) |
@@ -122,7 +138,7 @@ flowchart LR
     Attendant((Attendant))
     Manager((Manager))
 
-    subgraph SYS[Smart Parking Management System]
+    subgraph SYS[Tekashi Parking System]
         UC1([UC1 View slot availability])
         UC2([UC2 Enter parking])
         UC3([UC3 Wait in queue])
@@ -184,6 +200,26 @@ Every operation that changes the state follows the **write-through rule**:
 save the change to the database first, and only then update the in-memory
 structures (see Section 8.3). In the pseudocode, lines starting with
 `PERSIST:` are the database writes.
+
+**Conventions used in the implementation:**
+
+- **Errors:** where the pseudocode says `RETURN error "..."`, the Python code
+  raises a `ParkingError(message, status_code)` (defined in `models.py`). The
+  web layer turns it into an HTTP response: 400 bad input, 401 not signed in,
+  402 payment required, 404 not found, 409 conflict (e.g. duplicate plate),
+  502 M-Pesa unreachable.
+- **Locking:** every *public* module function (the ones the web pages call,
+  such as `handle_arrival`) takes the single state lock itself. *Helper*
+  functions (such as `peek_free_slot`) never take it, because they only run
+  inside a public function that already holds it. A `threading.Lock` taken
+  twice by the same thread would wait for itself forever (a deadlock).
+- **Records are read-only:** vehicle, queue and transaction records are
+  frozen dataclasses. A change always builds a new copy, saves it, and only
+  then replaces the old one in memory - which enforces the write-through rule.
+- **Database writes:** the SQL for every write lives in `database.py`
+  (`save_vehicle`, `delete_vehicle`, `add_to_queue`, `insert_transaction`, ...).
+  These helpers never commit on their own; the module decides which writes
+  succeed or fail together.
 
 ---
 
@@ -554,31 +590,46 @@ in force — the system is never left without a usable rate table.
 that it has been paid, so the barrier is permitted to open.
 
 **Data Structure Used:** Hash Table — extends the same vehicle record from
-Module 2 with the payment fields.
+Module 2 with the payment fields. M-Pesa requests are also logged in the
+`mpesa_requests` database table (Section 8.4).
 
 **Why:** Payment status belongs to a specific vehicle that is already being
 tracked. Rather than creating a separate structure, the existing O(1)
 lookup record is updated with `amount_paid`, `paid`, `payment_method`,
 `payment_reference` and `paid_at`.
 
-**Note on scope:** payment is **simulated** in this build (representing
-M-Pesa, card, or cash) instead of integrating a live payment gateway, to
-keep the focus on the data structures and modules. `simulate_gateway`
-returns success with a generated reference (e.g. `SIM-7F3K2Q`), or a
-failure when the demo operator chooses "simulate failure" — so the failure
-path can be demonstrated. The `payment_method` and `payment_reference`
-fields are designed so that real M-Pesa Daraja integration can replace
-`simulate_gateway` later without redesigning anything else.
+**Two ways to pay:**
+
+| Method | How it works |
+| --- | --- |
+| M-Pesa (Daraja keys in `.env`, `MPESA_ENABLED=true`) | Real sandbox STK Push: the driver's phone shows "Enter your M-Pesa PIN". The payment is **PENDING** until Safaricom reports **PAID** or **FAILED** (cancelled, timed out, wrong PIN, insufficient funds). |
+| Card, cash (and M-Pesa when switched off) | Simulated: confirmed instantly by `simulate_gateway`, which can also be told to decline so the failure path can be demonstrated. |
+
+**Why the system asks Safaricom instead of waiting to be told:** Daraja can
+send the result to a "callback" web address, but that address must be
+public on the internet, and a laptop running the system is not. So after
+sending the prompt, the exit page asks Safaricom for the result every few
+seconds (the STK Query API). Section 10 lists the callback as an extension.
+
+**Key rule - no network calls while holding the lock:** a call to Safaricom
+can take several seconds. Holding the state lock that long would freeze
+every gate and screen. So the M-Pesa flow runs in three phases: **reserve**
+(locked) → **call Safaricom** (unlocked) → **record the answer** (locked).
+The reservation (a `SENDING` row in `mpesa_requests`) is written *before*
+the call, so a double-tap finds it and can never send two prompts for one
+bill.
 
 **Algorithm:**
 
-1. A quote must exist (Module 3) — otherwise there is nothing to pay
-2. If nothing is owed, report that — a vehicle is never charged twice
-3. Send the outstanding balance to the (simulated) gateway
-4. On failure: change nothing; `paid` stays False, the driver retries
-5. On success: update the record and save it
+1. A quote must exist (Module 3) - otherwise there is nothing to pay
+2. If nothing is owed, report that - a vehicle is never charged twice
+3. Card / cash: send the balance to the simulator; on success update the
+   record, on failure change nothing
+4. M-Pesa: reserve a request, send the prompt, store Safaricom's id
+5. The exit page checks the prompt every few seconds until it is PAID
+   (update the record) or FAILED (change nothing, the driver retries)
 
-_Pseudocode:_
+_Pseudocode - simulated payment (card, cash):_
 
 ```
 FUNCTION confirm_payment(raw_plate, method, state):
@@ -600,7 +651,7 @@ FUNCTION confirm_payment(raw_plate, method, state):
 
     updated = copy of record
     updated.amount_paid = record.amount_paid + balance
-    updated.paid = True
+    updated.paid = (updated.amount_paid >= record.fee)
     updated.payment_method = method
     updated.payment_reference = result.reference
     updated.paid_at = now()
@@ -610,7 +661,50 @@ FUNCTION confirm_payment(raw_plate, method, state):
     RETURN receipt {plate, amount: balance, method, reference: result.reference}
 ```
 
-**Complexity:** O(1) average — direct hash table access by plate.
+_Pseudocode - M-Pesa STK Push:_
+
+```
+FUNCTION start_mpesa_payment(raw_plate, raw_phone, state):
+    phone = normalize_phone(raw_phone)          // 0712 345 678 -> 254712345678
+
+    // Phase 1 - locked: validate and RESERVE before calling Safaricom
+    WITH state.lock:
+        plate, record, balance = the same checks as confirm_payment
+        mark any SENDING/PENDING request older than 5 minutes as FAILED
+        IF an open request exists for plate:
+            RETURN error "An M-Pesa prompt is already waiting on the phone"
+        PERSIST: INSERT mpesa_requests (plate, masked phone, balance, status SENDING)
+
+    // Phase 2 - unlocked: the slow network call
+    checkout_id = daraja.stk_push(phone, balance, plate)
+    IF the call fails:
+        PERSIST: request status = FAILED
+        RETURN error "Could not reach M-Pesa"
+
+    // Phase 3 - locked: remember Safaricom's id
+    WITH state.lock:
+        PERSIST: request status = PENDING, checkout_request_id = checkout_id
+    RETURN "PENDING - enter your M-Pesa PIN"
+
+FUNCTION check_mpesa_payment(raw_plate, state):
+    WITH state.lock:
+        request = the newest PENDING request for plate
+    code = daraja.stk_query(request.checkout_request_id)     // unlocked
+    WITH state.lock:
+        IF request is no longer PENDING: RETURN its status   // another check finished it
+        IF code == "PENDING": RETURN "PENDING"
+        IF code != "0":
+            PERSIST: request status = FAILED
+            RETURN "FAILED" with a friendly reason (1032 cancelled, 1037 timed out, ...)
+        updated = record with amount_paid + request.amount, paid, method MPESA
+        PERSIST (one transaction): request status = SUCCESS, save updated record
+        vehicle_records[plate] = updated
+        RETURN "PAID"
+```
+
+**Complexity:** O(1) average for every step - direct hash table access by
+plate, plus one database lookup on an indexed column. The network calls
+take real time but do not grow with the size of the car park.
 
 ---
 
@@ -811,6 +905,12 @@ an afterthought:
 | 18 | 5, 6 — Exit / Audit | Database write fails during an exit | Whole transaction rolled back; memory untouched; barrier stays closed; safe to retry |
 | 19 | All | Server restarts or power cut | `rebuild_from_database` restores all structures on start-up (Section 8.6) |
 | 20 | All | Two requests arrive at the same moment | All state-changing operations run one at a time behind a single lock, so two cars can never be given the same slot |
+| 21 | 4 — Payment (M-Pesa) | Driver cancels the prompt, ignores it, enters a wrong PIN, or has too little money | Safaricom's result code (1032, 1037, 2001, 1) is shown as a plain reason; the record stays unpaid and the driver can try again |
+| 22 | 4 — Payment (M-Pesa) | Driver taps "Pay" twice | The reserved `mpesa_requests` row is found and the second prompt is refused (409) - never two prompts for one bill |
+| 23 | 4 — Payment (M-Pesa) | Safaricom cannot be reached | The request is marked FAILED, the driver sees "Could not reach M-Pesa" (502), nothing is charged |
+| 24 | 4 — Payment (M-Pesa) | A prompt never gets an answer (e.g. the server restarted mid-payment) | Requests still open after 5 minutes are marked FAILED, so they cannot block a new payment |
+| 25 | 4 — Payment (M-Pesa) | Daraja keys missing from `.env`, or `MPESA_ENABLED=false` | M-Pesa falls back to the simulator, so the system still works |
+| 26 | Admin | A staff page or staff API route is used without signing in | Page: redirected to the sign-in page. API: 401 "Admin login required". Plates are never shown on public pages |
 
 ---
 
@@ -836,7 +936,8 @@ m = rate tiers, t = transactions recorded.
 | 3 — Duration & Fee | Calculate duration | O(1) | O(1) |
 | 3 — Duration & Fee | Rate tier lookup | O(1) best | O(m) |
 | 3 — Duration & Fee | Load / validate rate table | O(m log m) | O(m log m) |
-| 4 — Payment | Confirm payment | O(1) | O(v) * |
+| 4 — Payment | Confirm payment (card / cash) | O(1) | O(v) * |
+| 4 — Payment | Start / check an M-Pesa prompt | O(1) + one network call | O(v) * + network |
 | 5 — Barrier Control | Process exit | O(1) | O(log n) |
 | 6 — Reporting | Log transaction (append) | O(1) amortized | O(t) ** |
 | 6 — Reporting | Total revenue / daily report | O(t) | O(t) |
@@ -871,7 +972,7 @@ flowchart TD
     H --> I[Module 3: compute duration and fee, store on record]
     I --> J{Balance due?}
     J -->|No - free stay or already paid| M
-    J -->|Yes| K[Module 4: payment - simulated M-Pesa, card or cash]
+    J -->|Yes| K[Module 4: payment - M-Pesa prompt, card or cash]
     K --> K1{Payment successful?}
     K1 -->|No - retry| K
     K1 -->|Yes| M[Driver drives to exit barrier]
@@ -884,6 +985,9 @@ flowchart TD
     P --> G
     S -->|No| T[Module 1: push slot back onto free heap]
 ```
+
+For M-Pesa, step K stays **pending** while the driver enters their PIN; the
+exit page asks Safaricom every few seconds until the answer is paid or failed.
 
 ---
 
@@ -919,10 +1023,14 @@ fast in-memory algorithms **and** permanent records.
 | `rate_table` (Sorted List) | `rate_tiers` | 3 |
 | `audit_log` (Append-only List) | `transactions` | 6 |
 | Configuration values | `settings` | All |
+| *(none - database only)* | `mpesa_requests` - a log of every M-Pesa prompt | 4 |
 
 Slot status is **not** stored as its own table: it can always be worked
 out from `active_vehicles` (each row holds a unique slot index). Storing it
 twice would risk the two copies disagreeing.
+
+`mpesa_requests` is the one table with no in-memory copy: it is a payment
+log that is only read when a driver's M-Pesa prompt is checked.
 
 ### 8.3 The write-through rule
 
@@ -937,7 +1045,8 @@ Every operation that changes state follows the same order:
 If step 1 fails, memory is never touched, so memory and database cannot
 drift apart. In addition, all state-changing operations run **one at a
 time** behind a single lock, so two simultaneous arrivals can never both
-receive the same slot.
+receive the same slot. The lock is never held during a call to Safaricom
+(Module 4), so a slow network cannot freeze the car park.
 
 ### 8.4 Schema (SQLite)
 
@@ -997,6 +1106,22 @@ CREATE TABLE transactions (
     payment_reference TEXT
 );
 
+-- Every M-Pesa STK Push request (Module 4). request_id is OUR id, created
+-- BEFORE calling Safaricom, so a double-tap can never send two prompts.
+CREATE TABLE mpesa_requests (
+    request_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plate               TEXT NOT NULL,
+    phone_masked        TEXT NOT NULL,                 -- e.g. 2547****4149, never the full number
+    amount_kes          INTEGER NOT NULL CHECK (amount_kes > 0),
+    checkout_request_id TEXT UNIQUE,                   -- Safaricom's id, known after the call
+    status              TEXT NOT NULL
+                        CHECK (status IN ('SENDING', 'PENDING', 'SUCCESS', 'FAILED')),
+    result_code         TEXT,
+    result_desc         TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
 -- Index so daily / date-range reports do not scan the whole table
 CREATE INDEX idx_transactions_barrier_time ON transactions (barrier_time);
 ```
@@ -1050,19 +1175,37 @@ erDiagram
         TEXT payment_reference
     }
 
+    MPESA_REQUESTS {
+        INTEGER request_id PK
+        TEXT plate
+        TEXT phone_masked
+        INTEGER amount_kes
+        TEXT checkout_request_id UK
+        TEXT status
+        TEXT result_code
+        TEXT result_desc
+        TEXT created_at
+        TEXT updated_at
+    }
+
     WAITING_QUEUE ||--o| ACTIVE_VEHICLES : "becomes on promotion"
     ACTIVE_VEHICLES ||--o| TRANSACTIONS : "archived as on exit"
+    ACTIVE_VEHICLES ||--o{ MPESA_REQUESTS : "paid through"
 ```
 
 The two relationships describe how a record **moves** between tables over a
 vehicle's lifetime (queue → active → transaction). They are not foreign
 keys, because the earlier row is deleted when the record moves on.
-`SETTINGS` and `RATE_TIERS` are reference tables read by the modules.
+A vehicle may have several M-Pesa requests (for example one cancelled, then
+one paid); they are linked by plate. `SETTINGS` and `RATE_TIERS` are
+reference tables read by the modules.
 
 ### 8.6 Start-up: rebuilding memory from the database
 
 On every start-up, the in-memory structures are rebuilt from SQLite, so a
-restart loses nothing:
+restart loses nothing. The function lives in `state.py` (next to the
+structures it builds) rather than `database.py`, because `database.py` only
+knows SQL - keeping them apart avoids a circular import:
 
 ```
 FUNCTION rebuild_from_database(db):
@@ -1095,9 +1238,8 @@ FUNCTION rebuild_from_database(db):
 
 ### 8.7 Invariants
 
-These statements must be true after every operation. The implementation
-will include a `check_invariants()` function that verifies them after
-start-up and during testing:
+These statements must be true after every operation. `check_invariants()`
+in `state.py` verifies them after start-up and during testing:
 
 1. `slots[i] == p` exactly when `vehicle_records[p].slot == i` — the array
    and the hash table always agree.
@@ -1108,6 +1250,13 @@ start-up and during testing:
    while a slot is free.
 5. `queued_set` holds exactly the plates in `waiting_queue`, and no plate is
    both parked and queued.
+6. `free_heap` obeys the heap rule. A heap is stored in a plain list: the
+   children of position `i` are at `2i + 1` and `2i + 2`, so every parent
+   `free_heap[(c - 1) // 2]` must be ≤ its child `free_heap[c]`. That is why
+   the lowest free slot is always `free_heap[0]`.
+
+The server refuses to start if any rule is broken ("fail fast"), and the
+automated tests check all six rules after every test.
 
 ### 8.8 Query capability: two-way lookup
 
@@ -1131,9 +1280,9 @@ KDA123X?" instantly, without scanning every record.
    calculates duration and fee against the rate table, and stores
    checkout time, duration and fee on the record (database first, then
    memory). Stays of 30 minutes or less are marked paid automatically.
-3. **Payment** — Module 4 sends the balance to the simulated gateway. On
-   success, the record's payment fields are updated (database first, then
-   memory).
+3. **Payment** — Module 4 sends an M-Pesa prompt to the driver's phone (or
+   takes a simulated card or cash payment). When the payment is confirmed,
+   the record's payment fields are updated (database first, then memory).
 4. **Barrier** — Module 5 checks the vehicle is known, paid, and within
    the grace period. In one database transaction it inserts the audit row,
    deletes the active row, and promotes the next queued vehicle if there is
@@ -1147,7 +1296,7 @@ KDA123X?" instantly, without scanning every record.
 
 ---
 
-## 9. Implementation Plan (Phase 2)
+## 9. Implementation (Phase 2)
 
 ### 9.1 From design to Python
 
@@ -1158,31 +1307,47 @@ KDA123X?" instantly, without scanning every record.
 | Queue (FIFO) | `collections.deque` (`append`, `popleft`) |
 | Hash Table | `dict` |
 | Hash Set | `set` |
+| Read-only records | `dataclasses` with `frozen=True`, changed with `dataclasses.replace` |
 | Rounding up minutes | `math.ceil` |
-| Timestamps with time zone | `datetime` with `zoneinfo.ZoneInfo("Africa/Nairobi")` |
+| Timestamps with time zone | `datetime` with `zoneinfo.ZoneInfo("Africa/Nairobi")` (plus `tzdata` on Windows) |
 | Database | `sqlite3` (built into Python) |
 | One operation at a time | `threading.Lock` |
-| Web server | FastAPI |
-| Web pages | Jinja2 templates |
+| Web server | FastAPI, run by uvicorn |
+| Web pages | Jinja2 templates (template inheritance and macros) |
+| M-Pesa calls | `httpx` (HTTP client) |
+| Secrets | `python-dotenv` reads the `.env` file |
+| Admin sessions | `secrets.token_urlsafe` tokens in an `httponly` cookie; `hmac.compare_digest` for the password |
+| Animations | Motion (motion.dev, the vanilla JavaScript version of Framer Motion), stored in `static/vendor/` |
+| Automated tests | `pytest` (with `httpx2` for FastAPI's test client) |
 
-### 9.2 Planned project structure
+### 9.2 Project structure
+
+The repository root is the project root:
 
 ```
-parking_system/
-├── main.py            # FastAPI app and page routes
-├── config.py          # constants and default settings
-├── database.py        # SQLite connection, schema, rebuild_from_database
-├── state.py           # the shared in-memory structures + lock + check_invariants
+tekashi-parking-system/
+├── main.py            # FastAPI app: start-up, JSON API routes, static files
+├── pages.py           # the web pages (Jinja2), admin sign-in / sign-out
+├── auth.py            # admin password check and session tokens
+├── config.py          # fixed settings and first-run defaults
+├── clock.py           # the single source of time (Kenyan time)
+├── models.py          # data shapes (VehicleRecord, QueueEntry, Transaction) + ParkingError
+├── database.py        # SQLite: connection, schema, read and write helpers
+├── state.py           # ParkingState, rebuild_from_database, check_invariants
+├── daraja.py          # M-Pesa Daraja client: stk_push, stk_query
 ├── modules/
 │   ├── slots.py       # Module 1 - Slot Management
 │   ├── entry.py       # Module 2 - Vehicle Entry
 │   ├── fees.py        # Module 3 - Duration & Fee Calculation
-│   ├── payment.py     # Module 4 - Payment
+│   ├── payment.py     # Module 4 - Payment (simulator + M-Pesa)
 │   ├── barrier.py     # Module 5 - Barrier Control
 │   └── audit.py       # Module 6 - Reporting / Audit
-├── templates/         # Jinja2 HTML pages
-├── static/            # CSS
-├── tests/             # boundary and exception tests
+├── templates/         # base.html, _macros.html, home, display, entry, exit, login, admin
+├── static/            # css/, js/ (app.js, effects.js), vendor/ (Motion), fonts/, img/
+├── tests/             # test_parking.py (modules) and test_web.py (pages, login)
+├── docs/              # this design document and README screenshots
+├── .env.example       # template for the secret .env file (never committed)
+├── requirements.txt
 └── README.md
 ```
 
@@ -1190,19 +1355,97 @@ parking_system/
 
 | Page | Users | Use cases |
 | --- | --- | --- |
+| `/` — home: live availability, how it works, prices | Everyone | UC1 |
 | `/display` — entrance availability screen (auto-refresh) | Driver | UC1 |
 | `/entry` — entry gate terminal | Driver / Attendant | UC2, UC3, UC4 |
 | `/exit` — quote, payment and barrier | Driver | UC5, UC6, UC7 |
-| `/admin` — vehicle lookup, rates, reports | Attendant / Manager | UC8, UC9, UC10 |
+| `/admin/login` — staff sign-in | Attendant / Manager | - |
+| `/admin` — vehicle lookup, queue, rates, reports | Attendant / Manager | UC8, UC9, UC10 |
+
+### 9.4 API routes
+
+The pages call this JSON API with JavaScript. It can also be tried directly
+at `/docs` (FastAPI's automatic documentation). Routes marked *admin* need
+the staff sign-in.
+
+| Method and route | Module | Use case |
+| --- | --- | --- |
+| `GET /api/display` | 1 | UC1 - public availability (no plates) |
+| `GET /api/admin/slots` *(admin)* | 1 | UC9 - every slot with its plate |
+| `GET /api/slots/{slot_number}` *(admin)* | 1 | UC9 - who is in a slot |
+| `POST /api/entry` | 2 | UC2, UC3 - check in, or join the queue |
+| `POST /api/queue/leave` | 2 | UC4 - leave the queue |
+| `GET /api/queue` *(admin)* | 2 | the waiting line, front first |
+| `GET /api/vehicles/{plate}` *(admin)* | 2 | UC9 - where a vehicle is |
+| `POST /api/exit/quote` | 3 | UC5 - duration and fee |
+| `GET /api/rates` | 3 | current prices |
+| `PUT /api/rates` *(admin)* | 3 | UC8 - change prices |
+| `POST /api/payment` | 4 | UC6 - pay (M-Pesa prompt, card, cash) |
+| `GET /api/payment/status/{plate}` | 4 | UC6 - check an M-Pesa prompt |
+| `POST /api/exit` | 5 | UC7 - open the barrier |
+| `GET /api/reports/summary` *(admin)* | 6 | UC10 - takings, VAT, one day's figures |
+| `GET /api/reports/transactions` *(admin)* | 6 | UC10 - recent completed stays |
+| `GET /api/health` | - | health check |
+
+### 9.5 Testing
+
+59 automated tests (`python -m pytest`) run against a fresh temporary
+database with a frozen, hand-moved clock, and never contact Safaricom:
+
+- **Module 3 boundaries:** the whole fee table from Section 4.3 (0, 30, 31,
+  120, 121 ... 361 minutes), rounding up, stays across midnight, and every
+  kind of invalid rate table.
+- **Journeys:** check in → quote → pay → exit; free stays; declined
+  payments; paying twice; queue promotion; the grace period and paying only
+  the difference.
+- **M-Pesa:** prompt then success, cancelled prompt, double-tap refused,
+  phone number formats (Safaricom is replaced by a fake in tests).
+- **Persistence:** a simulated restart rebuilds exactly the same structures.
+- **Web:** every page loads, the admin area is locked, sign-in and sign-out
+  work, and public pages never show number plates.
+- After every test, all six invariants (Section 8.7) are checked.
 
 ---
 
 ## 10. Future Extensions
 
-- Live M-Pesa Daraja (STK Push) integration, replacing `simulate_gateway`
+- Receive M-Pesa results through a callback URL (needs a public HTTPS
+  address) instead of asking Safaricom every few seconds
+- Go live with a real paybill or till number (Daraja production)
 - Separate `payments` table, so a stay paid in several parts (e.g. a
   top-up after the grace period) keeps every payment's method and reference
 - Automatic number-plate recognition (ANPR) cameras at entry and exit
 - Multiple entry and exit lanes
 - Online pre-booking of slots
 - Number-plate blacklisting and refund handling
+
+---
+
+## 11. Design Changes During Implementation
+
+Building the system improved the design in these ways. Each change keeps
+the data structures and algorithms above; it only adds safety or detail.
+
+| # | Change | Where it shows |
+| --- | --- | --- |
+| 1 | The system was named **Tekashi Parking System** | Title, Section 2.3 |
+| 2 | The repository root is the project root; the design lives in `docs/` | Section 9.2 |
+| 3 | `clock.py` added: one source of time, so memory and database always hold identical timestamps | Section 9.2 |
+| 4 | `rebuild_from_database` lives in `state.py` to avoid a circular import | Sections 8.6, 9.2 |
+| 5 | Invariant 6 added: the free-slot heap must obey the heap rule | Section 8.7 |
+| 6 | `models.py` added: shared data shapes and the `ParkingError` type | Sections 4, 9.2 |
+| 7 | `database.py` holds every SQL write; modules decide the transaction | Sections 4, 9.2 |
+| 8 | Locking rule: public module functions lock, helpers never do | Section 4 |
+| 9 | "RETURN error" in pseudocode is `raise ParkingError` with an HTTP status code | Section 4 |
+| 10 | The API route list was added | Section 9.4 |
+| 11 | Automated tests (`pytest`) added to the tools | Sections 9.1, 9.5 |
+| 12 | Real M-Pesa (Daraja sandbox STK Push) with a PENDING → PAID / FAILED flow checked by polling; card and cash simulated; M-Pesa falls back to the simulator | Sections 1.4, 4.4 |
+| 13 | New `mpesa_requests` table | Sections 8.2, 8.4, 8.5 |
+| 14 | `daraja.py`, `.env` and `.env.example` added; secrets never committed | Section 9.2 |
+| 15 | Sandbox prompts ask for KES 1 while the real fee is recorded | Section 1.4 |
+| 16 | New M-Pesa exceptions: cancelled / timed out / wrong PIN, double-tap, Safaricom unreachable, stale prompts | Section 5 (rows 21-25) |
+| 17 | Future: callback URL instead of polling | Section 10 |
+| 18 | Admin sign-in required for staff use cases and staff API routes | Sections 1.4, 2.1, 5 (row 26) |
+| 19 | `auth.py`, `pages.py`, `templates/` and `static/` added for the web interface | Section 9.2 |
+| 20 | Pages `/` (home) and `/admin/login` added | Section 9.3 |
+| 21 | `MPESA_ENABLED` switch; sandbox prompts to real phones take real money (usually reversed) | Section 1.4 |

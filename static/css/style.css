@@ -1,7 +1,7 @@
 /* ==========================================================================
    Tekashi Parking - style.css
    Black background, clean corporate layout (hairlines, space, one typeface),
-   bold Kenyan colour: flag stripes, red shuka checks, matatu yellow.
+   bold Kenyan colour: flag stripes, green and red with meaning, matatu yellow.
    Colour always MEANS something: green = free / go, red = taken / stop.
    Type: Archivo, one variable font. Its width axis does the work:
    expanded + heavy for bold headlines, normal width for calm body text.
@@ -13,6 +13,15 @@
        url("../fonts/archivo-variable.woff2") format("woff2");
   font-weight: 100 900;
   font-stretch: 62% 125%;
+  font-display: swap;
+}
+
+/* Grenze Gotisch: a bold, readable blackletter (Fraktur) - used only for the logo name. */
+@font-face {
+  font-family: "Grenze Gotisch";
+  src: url("../fonts/grenze-gotisch.woff2") format("woff2-variations"),
+       url("../fonts/grenze-gotisch.woff2") format("woff2");
+  font-weight: 100 900;
   font-display: swap;
 }
 
@@ -69,7 +78,7 @@ p { margin: 0; }
 .small { font-size: 0.9rem; }
 
 /* Bold display type: heavy and stretched wide. */
-.hero-title, .section-title, .page-title, .brand-name, .board-count strong,
+.hero-title, .section-title, .page-title, .board-count strong,
 .board-caption, .photo-band-title, .result-big, .leave-title, .quote-due dd {
   font-stretch: 125%;
   font-weight: 800;
@@ -98,10 +107,10 @@ p { margin: 0; }
   gap: 1rem;
 }
 
-/* The logo: "Tekashi" heavy and wide, "PARKING SYSTEM" small underneath,
+/* The logo: "Tekashi" in bold blackletter, "PARKING SYSTEM" small underneath,
    stretched (justified) to exactly the same width as the name above it. */
 .brand { display: inline-grid; color: var(--white); text-decoration: none; line-height: 1; }
-.brand-name { font-size: 1.95rem; font-weight: 900; letter-spacing: -0.03em; }
+.brand-name { font-family: "Grenze Gotisch", Georgia, serif; font-size: 2.3rem; font-weight: 800; letter-spacing: 0.01em; }
 .brand-sub {
   margin-top: 0.3rem;
   font-size: 0.62rem;
@@ -235,16 +244,13 @@ p { margin: 0; }
 /* The car turns around its own centre (0,0 in the drawing). */
 .hero-car { transform-box: fill-box; transform-origin: center; }
 
-/* ---------------------------------------------------------------- ticker (shuka band) */
+/* ---------------------------------------------------------------- ticker (moving sign) */
 
 .ticker {
   overflow: hidden;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 34px, rgba(0, 0, 0, 0.45) 34px 40px, transparent 40px 58px, rgba(27, 63, 168, 0.55) 58px 61px),
-    repeating-linear-gradient(0deg, transparent 0 18px, rgba(0, 0, 0, 0.45) 18px 24px, transparent 24px 42px, rgba(27, 63, 168, 0.55) 42px 45px),
-    var(--shuka);
-  border-top: 3px solid var(--black);
-  border-bottom: 3px solid var(--black);
+  background: var(--black);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 .ticker-track {
   display: inline-flex;
@@ -257,7 +263,6 @@ p { margin: 0; }
 .ticker-item {
   font-size: 1.25rem; font-weight: 800; font-stretch: 118%;
   color: var(--white);
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 .ticker-shield { width: 1.35rem; height: 2.1rem; flex: none; }
 @keyframes ticker { to { transform: translateX(-50%); } }   /* the list is doubled, so -50% loops */
@@ -366,6 +371,7 @@ p { margin: 0; }
 .board-status.is-full .board-count strong { color: var(--red); }
 .board-caption { font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1; margin: 0.5rem 0 1.2rem; }
 .board-queue { color: var(--grey); font-size: 1.25rem; max-width: 22rem; }
+.board-cta { margin-top: 1.6rem; min-height: 3.6rem; padding: 0 2.2rem; font-size: 1.15rem; }
 .board-lot .bay { min-height: 9.5rem; }
 .board-lot .bay-car { width: 1.8rem; height: 3.2rem; }
 .board-lot .bay-state { font-size: 0.9rem; }

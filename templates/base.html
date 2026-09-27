@@ -14,6 +14,7 @@
   <title>{% block title %}Tekashi Parking{% endblock %}</title>
   {# The font lives in static/fonts, so pages look right even without internet. #}
   <link rel="preload" href="{{ url_for('static', path='fonts/archivo-variable.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ url_for('static', path='fonts/grenze-gotisch.woff2') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
 </head>
 <body data-page="{{ page }}" class="{% block body_class %}{% endblock %}">
