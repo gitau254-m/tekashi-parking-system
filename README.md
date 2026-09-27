@@ -120,8 +120,8 @@ fee as paid.
 python -m pytest
 ```
 
-59 tests cover every fee boundary, full check-in-to-exit journeys, the
-queue, the grace period, M-Pesa (with Safaricom faked), a simulated restart,
+64 tests cover every fee boundary, full check-in-to-exit journeys, the
+queue, the grace period, returning cars, M-Pesa (with Safaricom faked), a simulated restart,
 and the admin sign-in. After every test, the six rules the data must always
 obey (the invariants) are checked.
 

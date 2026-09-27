@@ -10,7 +10,7 @@ with app.include_router(router). This keeps main.py short.
 """
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
 import auth
@@ -55,7 +55,14 @@ def render(request: Request, template: str, page: str, **context) -> HTMLRespons
 
 
 # ---------------------------------------------------------------- public pages
-
+@router.get("/favicon.ico")
+def favicon():
+       """
+       Browsers ask for /favicon.ico on their own, even without a <link> tag.
+       Answering it (instead of a 404) keeps the server log clean and gives
+       older browsers the icon too.
+       """
+       return FileResponse(BASE_DIR / "static" / "img" / "favicon.ico")
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request):
     """Landing page: hero, live availability, how it works, prices."""

@@ -60,9 +60,24 @@ def get_summary(state: "ParkingState", day: date) -> dict:
                 "vat_rate_percent": state.vat_rate_percent}
 
 
-def recent_transactions(state: "ParkingState", limit: int = 20) -> list[dict]:
-    """Newest first. [-limit:] = last 'limit' items; reversed() walks them backwards.
-    {**a, "k": v} copies dict a and adds one more key."""
+def recent_transactions(state: "ParkingState", limit: int = 20, day: date | None = None,
+                        month: str | None = None) -> list[dict]:
+    """
+    Completed stays, newest first (UC10).
+      day="2026-09-27"-style date -> only stays that LEFT on that day
+      month="2026-08"             -> only stays that left in that month (e.g. last month's records)
+      neither                     -> the most recent stays
+    reversed() walks the log from newest to oldest; we stop after 'limit' matches. O(t).
+    {**a, "k": v} copies dict a and adds one more key.
+    """
     with state.lock:
-        return [{**asdict(txn), "slot_number": txn.slot + 1}
-                for txn in reversed(state.audit_log[-limit:])]
+        found = []
+        for txn in reversed(state.audit_log):
+            if day is not None and txn.barrier_time.date() != day:
+                continue
+            if month is not None and txn.barrier_time.strftime("%Y-%m") != month:
+                continue
+            found.append({**asdict(txn), "slot_number": txn.slot + 1})
+            if len(found) == limit:
+                break
+        return found

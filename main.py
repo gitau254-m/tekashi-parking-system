@@ -18,7 +18,7 @@ Test every route at http://127.0.0.1:8000/docs
 from contextlib import asynccontextmanager
 from datetime import date
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -199,6 +199,11 @@ def report_summary(request: Request, day: date | None = None):
 
 
 @app.get("/api/reports/transactions", tags=["6. Reports"], dependencies=ADMIN_ONLY)
-def report_transactions(request: Request, limit: int = 20):
-    """UC10: latest completed stays, newest first."""
-    return audit.recent_transactions(get_state(request), limit)
+def report_transactions(
+    request: Request,
+    limit: int = Query(20, ge=1, le=2000),                       # ge/le: allowed range
+    day: date | None = None,                                     # e.g. 2026-09-27
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),   # e.g. 2026-08
+):
+    """UC10: completed stays, newest first - for one day, one month, or the latest."""
+    return audit.recent_transactions(get_state(request), limit, day, month)

@@ -60,3 +60,15 @@ def test_public_display_hides_plates(client):
     client.post("/api/entry", json={"plate": "KDA123X"})
     assert "KDA123X" not in client.get("/display").text
     assert "KDA123X" not in str(client.get("/api/display").json())
+
+
+def test_favicon_is_served(client):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+    assert client.get("/static/img/logo-mark.png").status_code == 200
+
+
+def test_stays_report_accepts_a_month_and_rejects_bad_input(client):
+    client.post("/admin/login", data={"password": "test-pass"})
+    assert client.get("/api/reports/transactions?month=2026-09").status_code == 200
+    assert client.get("/api/reports/transactions?month=September").status_code == 422

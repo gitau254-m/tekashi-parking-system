@@ -16,6 +16,11 @@
   <link rel="preload" href="{{ url_for('static', path='fonts/archivo-variable.woff2') }}" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="{{ url_for('static', path='fonts/grenze-gotisch.woff2') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+  {# Browser-tab icons: a small PNG for tabs, a larger one for high-resolution
+     screens, and a square PNG that iPhones use when the site is saved to the home screen. #}
+  <link rel="icon" href="{{ url_for('static', path='img/favicon-32.png') }}" sizes="32x32" type="image/png">
+  <link rel="icon" href="{{ url_for('static', path='img/logo-mark.png') }}" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='img/apple-touch-icon.png') }}">
 </head>
 <body data-page="{{ page }}" class="{% block body_class %}{% endblock %}">
 
@@ -43,8 +48,12 @@
   {% block header %}
   <header class="site-header">
     <a class="brand" href="/" aria-label="Tekashi Parking System home">
-      <span class="brand-name">Tekashi</span>
-      <span class="brand-sub">Parking System</span>
+      {# alt="" : the link already has a label, so screen readers skip the picture. #}
+      <img class="brand-mark" src="{{ url_for('static', path='img/logo-mark.png') }}" alt="" width="48" height="48">
+      <span class="brand-text">
+        <span class="brand-name">Tekashi</span>
+        <span class="brand-sub">Parking System</span>
+      </span>
     </a>
     <nav class="site-nav" aria-label="Main">
       <a href="/display" {% if page == 'display' %}aria-current="page"{% endif %}>Live bays</a>

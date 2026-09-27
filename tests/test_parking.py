@@ -320,6 +320,32 @@ def test_grace_period_expiry_charges_only_the_difference(state, advance):
     assert state.audit_log[0].amount_paid == 100
 
 
+# ---------------------------------------------------------------- the same car, more than once
+
+def test_same_car_can_park_again_after_leaving(state, advance):
+    """"Never charged twice" is per STAY, not per plate: a returning car starts a new stay."""
+    quoted(state, advance)                               # stay 1: 45 min -> KES 50
+    payment.pay(state, "KDA123X", "CASH")
+    barrier.process_exit(state, "KDA123X")               # stay 1 is over and archived
+
+    advance(minutes=5)
+    assert entry.handle_arrival(state, "KDA123X")["status"] == "ENTERED"   # stay 2 starts fresh
+    advance(minutes=45)
+    quote = fees.request_exit_quote(state, "KDA123X")
+    assert (quote["amount_paid"], quote["balance_due"]) == (0, 50)        # pays again, as it should
+    assert len(state.audit_log) == 1                     # stay 1 is kept in history
+
+
+def test_paid_car_that_is_called_back_pays_only_the_extra_time(state, advance):
+    """Paid, then stays longer (e.g. called back inside): the grace period catches it."""
+    quoted(state, advance, minutes=100)                  # 100 min -> KES 50, paid
+    payment.pay(state, "KDA123X", "MPESA")
+    advance(minutes=40)                                  # back inside, past the 15-minute window
+    with pytest.raises(ParkingError):
+        barrier.process_exit(state, "KDA123X")           # barrier stays closed
+    quote = fees.request_exit_quote(state, "KDA123X")    # 140 min -> KES 100
+    assert (quote["amount_paid"], quote["balance_due"]) == (50, 50)       # only the difference
+
 # ---------------------------------------------------------------- Module 6: reports
 
 def test_reports_and_vat(state, advance):
@@ -336,6 +362,25 @@ def test_reports_and_vat(state, advance):
     assert summary["total_vat"] == 20.69                 # 150 x 16 / 116
     newest = audit.recent_transactions(state, limit=1)[0]
     assert newest["plate"] == "BBB222"
+
+
+def test_stays_can_be_listed_by_day_and_month(state, advance):
+    """The admin can pull up one day's stays, or a whole month's (e.g. last month)."""
+    def one_stay(plate):
+        quoted(state, advance, plate=plate)
+        payment.pay(state, plate, "CASH")
+        barrier.process_exit(state, plate)
+
+    one_stay("AAA111")                                   # leaves 25 Sep
+    advance(minutes=3 * 24 * 60)
+    one_stay("BBB222")                                   # leaves 28 Sep
+    advance(minutes=10 * 24 * 60)
+    one_stay("CCC333")                                   # leaves 8 Oct
+
+    today = clock.now().date()
+    assert [t["plate"] for t in audit.recent_transactions(state, day=today)] == ["CCC333"]
+    assert [t["plate"] for t in audit.recent_transactions(state, month="2026-09")] == ["BBB222", "AAA111"]
+    assert len(audit.recent_transactions(state, limit=2)) == 2
 
 
 def test_audit_log_survives_restart(state, advance):

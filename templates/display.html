@@ -8,8 +8,12 @@
 {% block header %}
 <header class="kiosk-header">
   <a class="brand" href="/" aria-label="Tekashi Parking System home">
-    <span class="brand-name">Tekashi</span>
-    <span class="brand-sub">Parking System</span>
+    {# alt="" : the link already has a label, so screen readers skip the picture. #}
+    <img class="brand-mark" src="{{ url_for('static', path='img/logo-mark.png') }}" alt="" width="48" height="48">
+    <span class="brand-text">
+      <span class="brand-name">Tekashi</span>
+      <span class="brand-sub">Parking System</span>
+    </span>
   </a>
   <p class="kiosk-time"><span data-date></span><time data-clock></time></p>
 </header>

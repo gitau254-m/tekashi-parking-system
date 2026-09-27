@@ -69,14 +69,24 @@
 </section>
 
 <section class="panel">
-  <h2 class="panel-title">Recent stays</h2>
+  <div class="panel-head">
+    <h2 class="panel-title">Stays</h2>
+    <label class="field-label" for="stays-range">Show</label>
+    {# "chosen day" and "chosen month" follow the "Takings for" date at the top. #}
+    <select class="text-input select" id="stays-range" data-stays-range>
+      <option value="recent">The latest 20</option>
+      <option value="day">On the chosen day</option>
+      <option value="month">In the chosen month</option>
+    </select>
+  </div>
+  <p class="muted small" data-stays-summary></p>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
-        <tr><th scope="col">Plate</th><th scope="col">Bay</th><th scope="col">In</th><th scope="col">Out</th>
-            <th scope="col">Time</th><th scope="col">Paid</th><th scope="col">Method</th></tr>
+        <tr><th scope="col">Date</th><th scope="col">Plate</th><th scope="col">Bay</th><th scope="col">In</th>
+            <th scope="col">Out</th><th scope="col">Time</th><th scope="col">Paid</th><th scope="col">Method</th></tr>
       </thead>
-      <tbody data-transactions><tr><td colspan="7" class="muted">Loading...</td></tr></tbody>
+      <tbody data-transactions><tr><td colspan="8" class="muted">Loading...</td></tr></tbody>
     </table>
   </div>
 </section>

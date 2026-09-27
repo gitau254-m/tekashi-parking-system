@@ -393,18 +393,44 @@ function initAdmin() {
     }
   }
 
+  /** "27 Sep 2026" */
+  function formatDate(iso) {
+    return new Date(iso).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" });
+  }
+
   async function loadTransactions() {
-    const r = await api("GET", "/api/reports/transactions?limit=15");
+    // Which stays to show: the latest 20, one day, or a whole month (e.g. last month's records).
+    const range = $("[data-stays-range]").value;
+    const day = dayInput.value;                        // "2026-09-27"
+    let url = "/api/reports/transactions?limit=20";
+    let label = "the latest";
+    if (range === "day") {
+      url = `/api/reports/transactions?limit=2000&day=${day}`;
+      label = "on " + formatDate(day + "T12:00");
+    } else if (range === "month") {
+      url = `/api/reports/transactions?limit=2000&month=${day.slice(0, 7)}`;
+      label = "in " + new Date(day + "T12:00").toLocaleDateString("en-KE", { month: "long", year: "numeric" });
+    }
+
+    const r = await api("GET", url);
     if (needsLogin(r) || !r.ok) return;
+    const total = r.data.reduce((sum, t) => sum + t.amount_paid, 0);   // add up what was paid
+    $("[data-stays-summary]").textContent =
+      `${r.data.length} ${r.data.length === 1 ? "stay" : "stays"} ${label}, ${kes(total)} collected.`;
+
     const body = $("[data-transactions]");
     body.replaceChildren();
     if (!r.data.length) {
-      body.innerHTML = '<tr><td colspan="7" class="muted">No completed stays yet.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="muted">No completed stays for this period.</td></tr>';
       return;
     }
     for (const t of r.data) {
+      // Show the date on "In" too when the car arrived on an earlier day (overnight stays).
+      const sameDay = new Date(t.entry_time).toDateString() === new Date(t.barrier_time).toDateString();
+      const arrived = sameDay ? formatTime(t.entry_time)
+        : new Date(t.entry_time).toLocaleDateString("en-KE", { day: "numeric", month: "short" }) + " " + formatTime(t.entry_time);
       const row = document.createElement("tr");
-      const cells = [t.plate, t.slot_number, formatTime(t.entry_time), formatTime(t.barrier_time),
+      const cells = [formatDate(t.barrier_time), t.plate, t.slot_number, arrived, formatTime(t.barrier_time),
                      formatMinutes(t.duration_minutes), kes(t.amount_paid),
                      t.payment_method === "MPESA" ? "M-Pesa" : t.payment_method.charAt(0) + t.payment_method.slice(1).toLowerCase()];
       for (const value of cells) {
@@ -479,7 +505,8 @@ function initAdmin() {
     }
   });
 
-  dayInput.addEventListener("change", loadSummary);
+  dayInput.addEventListener("change", () => { loadSummary(); loadTransactions(); });
+  $("[data-stays-range]").addEventListener("change", loadTransactions);
   loadRates();
   every(10, () => { loadSummary(); loadSlots(); loadQueue(); loadTransactions(); });
 }
